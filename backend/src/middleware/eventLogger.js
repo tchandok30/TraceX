@@ -1,14 +1,9 @@
 const Event = require("../models/Event");
-
-const 
-    detectBruteForce
- = require("../services/detectionService");
+const { detectThreat } = require("../services/detectionService");
 
 const eventLogger = async (req, res, next) => {
-
     res.on("finish", async () => {
         try {
-
             const event = await Event.create({
                 type: "API_REQUEST",
                 userId: req.user ? req.user.userId : null,
@@ -22,17 +17,12 @@ const eventLogger = async (req, res, next) => {
                 }
             });
 
-            if (
-                event.endpoint === "/api/demo/login" &&
-                event.method === "POST" &&
-                event.statusCode === 401
-            ) {
-                const result = await detectBruteForce(event.ip);
+            const result = await detectThreat(event);
 
-                if (result.detected) {
-                    console.log("🚨 BRUTE FORCE DETECTED");
-                    console.log("Incident ID:", result.incident._id);
-                }
+            if (result.detected) {
+                console.log("🚨 THREAT DETECTED");
+                console.log("Type:", result.incident.type);
+                console.log("Incident ID:", result.incident._id);
             }
 
         } catch (error) {
