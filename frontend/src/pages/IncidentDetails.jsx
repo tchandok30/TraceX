@@ -1,525 +1,137 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import ReactFlow, {
-  Background,
-  Controls,
-  MiniMap,
-} from "reactflow";
-
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import ReactFlow, { Background, Controls, MiniMap } from "reactflow";
 import "reactflow/dist/style.css";
+import { ArrowLeft, Check, Clock3, Copy, ExternalLink, RefreshCw, ShieldAlert, X } from "lucide-react";
 import api from "../services/api";
+import { SeverityBadge, StatusBadge } from "../components/StatusBadge";
+import LoadingState, { EmptyState, ErrorState } from "../components/LoadingState";
 
-function IncidentDetails() {
+const nodeColors = {
+  INCIDENT: { bg: "#3b1720", border: "#f05268" },
+  IP: { bg: "#142b4a", border: "#4f9cf9" },
+  EVENT: { bg: "#3c2b15", border: "#f3b64d" },
+  API: { bg: "#24204b", border: "#8b83ff" },
+  USER: { bg: "#123b37", border: "#34d399" },
+  SESSION: { bg: "#3b2148", border: "#d78aff" },
+  RESOURCE: { bg: "#3c2c1c", border: "#fb923c" }
+};
+
+export default function IncidentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
-
   const [incident, setIncident] = useState(null);
   const [timeline, setTimeline] = useState([]);
-  const [graphNodes, setGraphNodes] = useState([]);
-  const [graphEdges, setGraphEdges] = useState([]);
+  const [rawNodes, setRawNodes] = useState([]);
+  const [rawEdges, setRawEdges] = useState([]);
+  const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [updating, setUpdating] = useState(false);
+  const [status, setStatus] = useState("");
 
-  useEffect(() => {
-    const fetchIncident = async () => {
-      try {
-        const token = localStorage.getItem("token");
-
-        const config = {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        };
-
-        const incidentResponse = await api.get(
-          `/incidents/${id}`,
-          config
-        );
-
-        const timelineResponse = await api.get(
-          `/incidents/${id}/timeline`,
-          config
-        );
-
-        const graphResponse = await api.get(
-          `/incidents/${id}/graph`,
-          config
-        );
-
-        setIncident(incidentResponse.data.incident);
-        setTimeline(timelineResponse.data.timeline);
-
-        setGraphNodes(graphResponse.data.nodes);
-        setGraphEdges(graphResponse.data.edges);
-
-      } catch (error) {
-        console.log("Incident details error:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchIncident();
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const [incidentRes, timelineRes, graphRes] = await Promise.all([
+        api.get(`/incidents/${id}`),
+        api.get(`/incidents/${id}/timeline`),
+        api.get(`/incidents/${id}/graph`)
+      ]);
+      const incidentData = incidentRes.data.incident || incidentRes.data;
+      const timelineData = Array.isArray(timelineRes.data) ? timelineRes.data : (timelineRes.data.timeline || []);
+      const graphData = graphRes.data.graph || graphRes.data;
+      setIncident(incidentData);
+      setStatus(incidentData.status || "OPEN");
+      setTimeline(timelineData);
+      setRawNodes(graphData.nodes || []);
+      setRawEdges(graphData.edges || []);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Unable to load this incident.");
+    } finally { setLoading(false); }
   }, [id]);
+  useEffect(() => { load(); }, [load]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
-        <div className="text-center">
+  const graphNodes = useMemo(() => {
+    const grouped = {};
+    rawNodes.forEach(node => {
+      grouped[node.type] = grouped[node.type] || [];
+      grouped[node.type].push(node);
+    });
+    const xPositions = { INCIDENT: 40, IP: 280, EVENT: 550, API: 850, USER: 280, SESSION: 550, RESOURCE: 850 };
+    const output = [];
+    Object.entries(grouped).forEach(([type, nodes]) => nodes.forEach((node, index) => {
+      const column = xPositions[type] ?? 500;
+      const row = index;
+      const color = nodeColors[type] || nodeColors.API;
+      output.push({
+        id: node.id,
+        position: { x: column, y: 50 + row * 125 },
+        data: { label: <div className="graph-node-content"><span>{type}</span><strong>{node.label}</strong></div>, details: node.details || { title: node.label, type, id: node.id } },
+        style: { background: color.bg, border: `1px solid ${color.border}`, color: "#eef4ff", borderRadius: 10, minWidth: 145, maxWidth: 235, padding: 5, boxShadow: "0 8px 25px #0003" }
+      });
+    }));
+    return output;
+  }, [rawNodes]);
 
-          <div className="h-10 w-10 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin mx-auto" />
+  const graphEdges = useMemo(() => rawEdges.map((edge, index) => ({
+    id: `edge-${index}-${edge.source}-${edge.target}`,
+    source: edge.source,
+    target: edge.target,
+    label: edge.relationship,
+    animated: true,
+    style: { stroke: "#52657f", strokeWidth: 1.4 },
+    labelStyle: { fill: "#a9b9ce", fontSize: 10 },
+    labelBgStyle: { fill: "#0b1220", fillOpacity: 0.9 }
+  })), [rawEdges]);
 
-          <p className="text-slate-400 mt-4">
-            Loading incident investigation...
-          </p>
-
-        </div>
-      </div>
-    );
+  async function updateStatus() {
+    if (!status || status === incident.status) return;
+    setUpdating(true); setError("");
+    try {
+      const { data } = await api.patch(`/incidents/${id}/status`, { status });
+      const updatedIncident = data?.incident || (data?._id ? data : null);
+      setIncident(updatedIncident || { ...incident, status });
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not update status. Check your incidentRoutes endpoint.");
+      setStatus(incident.status);
+    } finally { setUpdating(false); }
   }
 
-  if (!incident) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white p-8">
-
-        <button
-          onClick={() => navigate("/dashboard")}
-          className="text-slate-400 hover:text-white"
-        >
-          ← Back to Dashboard
-        </button>
-
-        <h1 className="text-2xl font-bold mt-8">
-          Incident not found
-        </h1>
-
-      </div>
-    );
+  async function copyIncidentId() {
+    try { await navigator.clipboard.writeText(incident._id); } catch { /* clipboard may be blocked in insecure contexts */ }
   }
 
-  const formattedDate = new Date(
-    incident.createdAt
-  ).toLocaleString();
-
-  const graphReactNodes = graphNodes.map((node) => {
-
-    let position = {
-      x: 0,
-      y: 0,
-    };
-
-    if (node.type === "INCIDENT") {
-      position = {
-        x: 50,
-        y: 220,
-      };
-    }
-
-    if (node.type === "IP") {
-      position = {
-        x: 350,
-        y: 220,
-      };
-    }
-
-    if (node.type === "EVENT") {
-
-      const eventIndex = graphNodes
-        .filter((n) => n.type === "EVENT")
-        .findIndex((n) => n.id === node.id);
-
-      position = {
-        x: 650,
-        y: 60 + eventIndex * 130,
-      };
-    }
-
-    if (node.type === "API") {
-
-      const apiIndex = graphNodes
-        .filter((n) => n.type === "API")
-        .findIndex((n) => n.id === node.id);
-
-      position = {
-        x: 1000,
-        y: 100 + apiIndex * 160,
-      };
-    }
-
-    return {
-      id: node.id,
-
-      position,
-
-      data: {
-        label: (
-          <div className="px-3 py-2">
-
-            <p className="text-[10px] text-slate-400 uppercase">
-              {node.type}
-            </p>
-
-            <p className="text-sm font-medium">
-              {node.label}
-            </p>
-
-          </div>
-        ),
-      },
-
-      style: {
-        background:
-          node.type === "INCIDENT"
-            ? "#3f1d1d"
-            : node.type === "IP"
-            ? "#172554"
-            : node.type === "EVENT"
-            ? "#422006"
-            : "#172554",
-
-        color: "white",
-
-        border:
-          node.type === "INCIDENT"
-            ? "1px solid #ef4444"
-            : node.type === "IP"
-            ? "1px solid #3b82f6"
-            : node.type === "EVENT"
-            ? "1px solid #f59e0b"
-            : "1px solid #6366f1",
-
-        borderRadius: "10px",
-
-        minWidth: "150px",
-      },
-    };
-  });
-
-  const graphReactEdges = graphEdges.map(
-    (edge, index) => ({
-      id: `edge-${index}`,
-
-      source: edge.source,
-
-      target: edge.target,
-
-      label: edge.relationship,
-
-      animated: true,
-
-      style: {
-        stroke: "#64748b",
-      },
-
-      labelStyle: {
-        fill: "#94a3b8",
-        fontSize: 10,
-      },
-    })
-  );
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-white">
-
-      {/* Navbar */}
-
-      <nav className="border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="flex items-center gap-3 hover:opacity-80 transition"
-          >
-
-            <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold">
-              T
-            </div>
-
-            <div className="text-left">
-
-              <h1 className="font-bold text-lg">
-                TraceX
-              </h1>
-
-              <p className="text-xs text-slate-500">
-                Incident Investigation
-              </p>
-
-            </div>
-
-          </button>
-
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="px-4 py-2 text-sm rounded-lg border border-slate-700 hover:bg-slate-800 transition"
-          >
-            ← Dashboard
-          </button>
-
-        </div>
-
-      </nav>
-
-      {/* Main */}
-
-      <main className="max-w-7xl mx-auto px-6 py-8">
-
-        {/* Header */}
-
-        <div className="mb-8">
-
-          <p className="text-sm text-blue-400 font-medium mb-2">
-            SECURITY INCIDENT
-          </p>
-
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-
-            <div>
-
-              <h1 className="text-3xl font-bold">
-                {incident.type}
-              </h1>
-
-              <p className="text-slate-500 text-sm mt-2">
-                Incident ID: {incident._id}
-              </p>
-
-            </div>
-
-            <div className="flex gap-3">
-
-              <span
-                className={`px-3 py-1.5 rounded-full text-xs font-medium ${
-                  incident.severity === "CRITICAL"
-                    ? "bg-red-500/10 text-red-400"
-                    : incident.severity === "HIGH"
-                    ? "bg-orange-500/10 text-orange-400"
-                    : incident.severity === "MEDIUM"
-                    ? "bg-yellow-500/10 text-yellow-400"
-                    : "bg-blue-500/10 text-blue-400"
-                }`}
-              >
-                {incident.severity}
-              </span>
-
-              <span className="px-3 py-1.5 rounded-full text-xs font-medium bg-red-500/10 text-red-400">
-                {incident.status}
-              </span>
-
-            </div>
-
-          </div>
-
-        </div>
-
-        {/* Incident overview */}
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-
-            <p className="text-sm text-slate-500">
-              Source IP
-            </p>
-
-            <p className="text-lg font-semibold mt-2">
-              {incident.sourceIP}
-            </p>
-
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-
-            <p className="text-sm text-slate-500">
-              Events
-            </p>
-
-            <p className="text-2xl font-bold mt-2">
-              {timeline.length}
-            </p>
-
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-
-            <p className="text-sm text-slate-500">
-              Detected
-            </p>
-
-            <p className="text-sm font-medium mt-3">
-              {formattedDate}
-            </p>
-
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-
-            <p className="text-sm text-slate-500">
-              Status
-            </p>
-
-            <p className="text-lg font-semibold mt-2">
-              {incident.status}
-            </p>
-
-          </div>
-
-        </div>
-
-        {/* Description */}
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
-
-          <p className="text-sm text-slate-500 mb-2">
-            Incident Description
-          </p>
-
-          <p className="text-slate-300">
-            {incident.description}
-          </p>
-
-        </div>
-
-        {/* Investigation Timeline */}
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mb-8">
-
-          <div className="px-6 py-5 border-b border-slate-800">
-
-            <h2 className="text-lg font-semibold">
-              Investigation Timeline
-            </h2>
-
-            <p className="text-sm text-slate-500 mt-1">
-              Chronological activity associated with this incident
-            </p>
-
-          </div>
-
-          <div className="p-6">
-
-            {timeline.length === 0 ? (
-
-              <p className="text-slate-500">
-                No events found.
-              </p>
-
-            ) : (
-
-              <div className="relative">
-
-                <div className="absolute left-[7px] top-2 bottom-2 w-px bg-slate-700" />
-
-                <div className="space-y-7">
-
-                  {timeline.map((event) => (
-
-                    <div
-                      key={event._id}
-                      className="relative pl-8"
-                    >
-
-                      <div className="absolute left-0 top-1.5 h-4 w-4 rounded-full bg-blue-500 border-4 border-slate-900" />
-
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-
-                        <div>
-
-                          <div className="flex items-center gap-3">
-
-                            <span className="font-mono text-sm text-blue-400">
-                              {event.method}
-                            </span>
-
-                            <span className="font-mono text-sm">
-                              {event.endpoint}
-                            </span>
-
-                          </div>
-
-                          <p className="text-sm text-slate-500 mt-2">
-                            Source IP: {event.ip}
-                          </p>
-
-                        </div>
-
-                        <div className="md:text-right">
-
-                          <span
-                            className={`text-xs px-2.5 py-1 rounded-full ${
-                              event.statusCode >= 400
-                                ? "bg-red-500/10 text-red-400"
-                                : "bg-green-500/10 text-green-400"
-                            }`}
-                          >
-                            HTTP {event.statusCode}
-                          </span>
-
-                          <p className="text-xs text-slate-600 mt-2">
-                            {new Date(
-                              event.timestamp
-                            ).toLocaleString()}
-                          </p>
-
-                        </div>
-
-                      </div>
-
-                    </div>
-
-                  ))}
-
-                </div>
-
-              </div>
-
-            )}
-
-          </div>
-
-        </div>
-
-        {/* Investigation Graph */}
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-
-          <div className="px-6 py-5 border-b border-slate-800">
-
-            <h2 className="text-lg font-semibold">
-              Investigation Graph
-            </h2>
-
-            <p className="text-sm text-slate-500 mt-1">
-              Relationships between the incident, source,
-              events and APIs
-            </p>
-
-          </div>
-
-          <div className="h-[600px] bg-slate-950">
-
-            <ReactFlow
-              nodes={graphReactNodes}
-              edges={graphReactEdges}
-              fitView
-            >
-
-              <Background color="#1e293b" />
-
-              <Controls />
-
-              <MiniMap />
-
-            </ReactFlow>
-
-          </div>
-
-        </div>
-
-      </main>
-
-    </div>
-  );
+  if (loading) return <LoadingState label="Building investigation workspace..." />;
+  if (error && !incident) return <ErrorState message={error} onRetry={load} />;
+  if (!incident) return <EmptyState title="Incident not found" message="This incident may have been removed." />;
+
+  return <div className="page-stack">
+    <button className="back-link" onClick={() => navigate("/incidents")}><ArrowLeft size={15} /> Back to incidents</button>
+    <section className="incident-detail-heading"><div><div className="eyebrow">INVESTIGATION WORKSPACE</div><h1>{incident.type}</h1><div className="incident-id-line"><span>INCIDENT ID</span><code>{incident._id}</code><button className="tiny-icon-button" onClick={copyIncidentId} title="Copy incident ID"><Copy size={13} /></button></div></div><div className="detail-badges"><SeverityBadge severity={incident.severity} /><StatusBadge status={incident.status} /></div></section>
+    {error && <div className="inline-error"><X size={15} />{error}</div>}
+    <section className="detail-stat-grid"><div className="detail-stat"><span>Source IP</span><strong className="mono-cell">{incident.sourceIP || "—"}</strong><small>Primary source observed</small></div><div className="detail-stat"><span>Linked events</span><strong>{timeline.length}</strong><small>Associated with this incident</small></div><div className="detail-stat"><span>Detected at</span><strong>{incident.createdAt ? new Date(incident.createdAt).toLocaleDateString() : "—"}</strong><small>{incident.createdAt ? new Date(incident.createdAt).toLocaleTimeString() : ""}</small></div><div className="detail-stat"><span>Current status</span><strong><StatusBadge status={incident.status} /></strong><small>Update status below</small></div></section>
+
+    <section className="panel status-action-panel"><div><h2>Investigation status</h2><p>Update the current incident workflow state.</p></div><div className="status-controls"><select value={status} onChange={e => setStatus(e.target.value)}><option>OPEN</option><option>INVESTIGATING</option><option>RESOLVED</option></select><button className="button button-primary button-small" disabled={updating || status === incident.status} onClick={updateStatus}>{updating ? "Saving..." : <><Check size={14} /> Save status</>}</button></div></section>
+
+    <section className="panel description-panel"><div className="section-icon"><ShieldAlert size={17} /></div><div><h2>Incident context</h2><p>{incident.description || "No description has been recorded for this incident."}</p></div></section>
+
+    <section className="panel">
+      <div className="panel-header"><div><h2><Clock3 size={17} /> Activity timeline</h2><p>Chronological events linked to this incident</p></div><span className="count-pill">{timeline.length} events</span></div>
+      {timeline.length === 0 ? <EmptyState title="No linked events" message="The incident has no events linked through incidentId yet." /> : <div className="timeline-list">{timeline.map((event, index) => <div className="timeline-item" key={event._id}><div className="timeline-track"><span className={`timeline-marker ${event.statusCode >= 400 ? "marker-error" : ""}`} />{index < timeline.length - 1 && <span className="timeline-line" />}</div><div className="timeline-event"><div className="timeline-event-head"><div className="event-title"><span className="method-pill">{event.method}</span><code>{event.endpoint}</code></div><span className={`http-pill ${event.statusCode >= 400 ? "http-error" : "http-ok"}`}>{event.statusCode}</span></div><div className="event-meta"><span>{event.ip}</span><span><Clock3 size={12} />{new Date(event.timestamp).toLocaleString()}</span></div>{event.sessionId && <div className="event-extra">Session: {event.sessionId}</div>}</div></div>)}</div>}
+    </section>
+
+    <section className="panel graph-panel">
+      <div className="panel-header"><div><h2><ActivityIcon /> Investigation graph</h2><p>Explore the relationships between incident entities and API activity.</p></div><button className="button button-secondary button-small" onClick={() => { setSelectedNode(null); load(); }}><RefreshCw size={14} /> Refresh graph</button></div>
+      <div className="graph-legend">{Object.entries(nodeColors).filter(([type]) => rawNodes.some(n => n.type === type)).map(([type, color]) => <span key={type}><i style={{ background: color.border }} />{type}</span>)}</div>
+      <div className="graph-canvas">
+        {graphNodes.length === 0 ? <EmptyState title="Graph has no nodes" message="No linked event data is available to visualize." /> : <ReactFlow nodes={graphNodes} edges={graphEdges} fitView minZoom={0.2} maxZoom={1.6} onNodeClick={(_, node) => setSelectedNode(node.data.details)} onPaneClick={() => setSelectedNode(null)}><Background color="#202b3c" gap={22} /><Controls /><MiniMap nodeColor={node => (nodeColors[rawNodes.find(n => n.id === node.id)?.type] || nodeColors.API).border} maskColor="#080d1880" /></ReactFlow>}
+      </div>
+      {selectedNode && <div className="node-inspector"><div className="panel-header"><div><div className="eyebrow">SELECTED ENTITY</div><h2>{selectedNode.title || "Node details"}</h2></div><button className="tiny-icon-button" onClick={() => setSelectedNode(null)}><X size={16} /></button></div><pre>{JSON.stringify(selectedNode, null, 2)}</pre></div>}
+    </section>
+  </div>;
 }
 
-export default IncidentDetails;
+function ActivityIcon() {
+  return <span className="inline-heading-icon">⌘</span>;
+}
