@@ -115,76 +115,155 @@ const getIncidentGraph = async (req, res) => {
 
         const events = await Event.find({
             incidentId: incident._id
-        }).sort({
-            timestamp: 1
-        });
+        }).sort({ timestamp: 1 });
 
-        const nodes = [];
+        const nodesMap = new Map();
         const edges = [];
 
-        // Incident node
-        nodes.push({
-            id: `incident-${incident._id}`,
+        const addNode = (node) => {
+            if (!nodesMap.has(node.id)) {
+                nodesMap.set(node.id, node);
+            }
+        };
+
+        const addEdge = (source, target, relationship) => {
+            edges.push({
+                source,
+                target,
+                relationship
+            });
+        };
+
+        const incidentNodeId = `incident-${incident._id}`;
+        const ipNodeId = `ip-${encodeURIComponent(incident.sourceIP)}`;
+
+        addNode({
+            id: incidentNodeId,
             type: "INCIDENT",
-            label: incident.type
+            label: incident.type,
+            details: {
+                title: incident.type,
+                severity: incident.severity,
+                status: incident.status,
+                description: incident.description,
+                sourceIP: incident.sourceIP,
+                createdAt: incident.createdAt
+            }
         });
 
-        // IP node
-        const ipNodeId = `ip-${incident.sourceIP}`;
-
-        nodes.push({
+        addNode({
             id: ipNodeId,
             type: "IP",
-            label: incident.sourceIP
+            label: incident.sourceIP,
+            details: {
+                title: "Source IP",
+                ip: incident.sourceIP
+            }
         });
 
-        edges.push({
-            source: ipNodeId,
-            target: `incident-${incident._id}`,
-            relationship: "TRIGGERED"
-        });
+        addEdge(ipNodeId, incidentNodeId, "TRIGGERED");
 
-        // Event + Endpoint nodes
-        events.forEach((event) => {
-
+        for (const event of events) {
             const eventNodeId = `event-${event._id}`;
 
-            nodes.push({
+            addNode({
                 id: eventNodeId,
                 type: "EVENT",
-                label: `${event.method} ${event.endpoint}`
+                label: `${event.method} ${event.endpoint}`,
+                details: {
+                    title: "API Event",
+                    method: event.method,
+                    endpoint: event.endpoint,
+                    statusCode: event.statusCode,
+                    ip: event.ip,
+                    timestamp: event.timestamp,
+                    userId: event.userId
+                        ? event.userId.toString()
+                        : null,
+                    sessionId: event.sessionId,
+                    resourceId: event.resourceId,
+                    metadata: event.metadata
+                }
             });
 
-            edges.push({
-                source: ipNodeId,
-                target: eventNodeId,
-                relationship: "GENERATED"
+            addEdge(ipNodeId, eventNodeId, "GENERATED");
+
+            // Connect event to its API endpoint
+            const apiNodeId =
+                `api-${encodeURIComponent(event.method)}-${encodeURIComponent(event.endpoint)}`;
+
+            addNode({
+                id: apiNodeId,
+                type: "API",
+                label: `${event.method} ${event.endpoint}`,
+                details: {
+                    title: "API Endpoint",
+                    method: event.method,
+                    endpoint: event.endpoint
+                }
             });
 
-            const endpointNodeId = `endpoint-${event.method}-${event.endpoint}`;
+            addEdge(eventNodeId, apiNodeId, "CALLED");
 
-            const endpointExists = nodes.some(
-                (node) => node.id === endpointNodeId
-            );
+            // Connect event to user, if available
+            if (event.userId) {
+                const userId = event.userId.toString();
+                const userNodeId = `user-${userId}`;
 
-            if (!endpointExists) {
-                nodes.push({
-                    id: endpointNodeId,
-                    type: "API",
-                    label: `${event.method} ${event.endpoint}`
+                addNode({
+                    id: userNodeId,
+                    type: "USER",
+                    label: `User ${userId.slice(-6)}`,
+                    details: {
+                        title: "User",
+                        userId
+                    }
                 });
+
+                addEdge(eventNodeId, userNodeId, "ASSOCIATED WITH");
             }
 
-            edges.push({
-                source: eventNodeId,
-                target: endpointNodeId,
-                relationship: "CALLED"
-            });
-        });
+            // Connect event to session, if available
+            if (event.sessionId) {
+                const sessionNodeId =
+                    `session-${encodeURIComponent(event.sessionId)}`;
+
+                addNode({
+                    id: sessionNodeId,
+                    type: "SESSION",
+                    label: `Session ${event.sessionId.slice(-6)}`,
+                    details: {
+                        title: "Session",
+                        sessionId: event.sessionId
+                    }
+                });
+
+                addEdge(eventNodeId, sessionNodeId, "USED");
+            }
+
+            // Connect event to resource, if available
+            if (event.resourceId) {
+                const resourceNodeId =
+                    `resource-${encodeURIComponent(event.resourceId)}`;
+
+                addNode({
+                    id: resourceNodeId,
+                    type: "RESOURCE",
+                    label: `Resource ${event.resourceId}`,
+                    details: {
+                        title: "Accessed Resource",
+                        resourceId: event.resourceId
+                    }
+                });
+
+                addEdge(eventNodeId, resourceNodeId, "ACCESSED");
+            }
+        }
 
         res.status(200).json({
             incident,
-            nodes,
+            eventCount: events.length,
+            nodes: Array.from(nodesMap.values()),
             edges
         });
 

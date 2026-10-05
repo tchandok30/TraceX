@@ -1,6 +1,6 @@
 const express=require("express");
 const router=express.Router();
-
+const protect = require("../middleware/authMiddleware");
 
 
 router.post("/login",async(req,res)=>{
@@ -65,18 +65,18 @@ router.get("/files", (req, res) => {
     });
 });
 
-router.get("/admin/users", (req, res) => {
+router.get("/admin/users", protect, (req, res) => {
+    if (req.user.role !== "ADMIN") {
+        return res.status(403).json({
+            message: "Forbidden: Admin access required"
+        });
+    }
+
     res.json({
-        message: "Admin users fetched successfully",
+        message: "Users fetched successfully",
         users: [
-            {
-                id: 1,
-                name: "Admin"
-            },
-            {
-                id: 2,
-                name: "Security"
-            }
+            { id: 1, name: "Admin" },
+            { id: 2, name: "Security" }
         ]
     });
 });

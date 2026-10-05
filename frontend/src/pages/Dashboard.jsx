@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
-
+import Sidebar from "../components/Sidebar";
 function Dashboard() {
   const [user, setUser] = useState(null);
   const [incidents, setIncidents] = useState([]);
@@ -82,6 +82,10 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
+
+  <Sidebar />
+
+  <div className="ml-64">
 
       {/* Navbar */}
 
@@ -403,7 +407,7 @@ function Dashboard() {
 
       </main>
 
-    </div>
+    </div></div>
   );
 }
 

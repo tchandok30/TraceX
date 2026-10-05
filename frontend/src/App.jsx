@@ -4,20 +4,45 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import IncidentDetails from "./pages/IncidentDetails";
 
+function ProtectedRoute({ children }) {
+  const token = localStorage.getItem("token");
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
 
+        {/* Login */}
         <Route path="/login" element={<Login />} />
 
-        <Route path="/dashboard" element={<Dashboard />} />
-
+        {/* Dashboard */}
         <Route
-          path="/incidents/:id"
-          element={<IncidentDetails />}
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
         />
 
+        {/* Incident Details */}
+        <Route
+          path="/incidents/:id"
+          element={
+            <ProtectedRoute>
+              <IncidentDetails />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Default */}
         <Route
           path="*"
           element={<Navigate to="/dashboard" replace />}
