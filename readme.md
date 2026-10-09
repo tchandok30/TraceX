@@ -1,366 +1,208 @@
-# TraceX — Application Incident Investigation & Response Platform
+# TraceX — Cybersecurity Incident Detection & Investigation Platform
 
-> **From suspicious event to complete incident story.**
+**TraceX** is a MERN-stack cybersecurity platform designed to monitor API activity, detect suspicious request patterns, generate security incidents, and help investigators trace relationships between incidents, source IPs, events, and API endpoints.
 
-TraceX is a full-stack security investigation platform designed to help investigators understand **what happened, how it happened, and what was affected** during an application security incident.
+The platform combines request-level telemetry with rule-based threat detection and incident-linked graph visualization to make security investigation more structured and understandable.
 
-Instead of simply displaying logs, TraceX connects application events into **incidents, timelines, investigation graphs, and impact analysis**, making it easier to reconstruct suspicious activity.
+## Key Features
 
----
+### 🔍 Real-Time API Activity Monitoring
 
-## 🚀 Key Features
+* Captures API request metadata, including HTTP methods, endpoints, response status codes, source IPs, and timestamps.
+* Records request activity through centralized Express middleware.
+* Stores event data in MongoDB for investigation and analysis.
 
-### 🔐 Authentication & RBAC
+### 🛡️ Rule-Based Threat Detection
 
-* User registration and login
-* JWT-based authentication
-* Password hashing using bcrypt
-* Role-based access control
-* `ADMIN` and `INVESTIGATOR` roles
-* Protected investigation APIs
+TraceX evaluates recorded API activity against configurable detection rules to identify suspicious behavior, including:
 
-### 📡 Application Event Collection
+* **Brute-force attempts:** Detects repeated failed login attempts.
+* **Endpoint scanning:** Identifies requests to multiple nonexistent endpoints.
+* **Abnormal access:** Flags unauthorized attempts to access protected resources.
+* **Excessive request frequency:** Identifies unusually high request volumes within a short time window.
 
-TraceX records application activity such as:
+When a configured rule is triggered, the detection service can create a corresponding security incident.
 
-* API endpoint
-* HTTP method
-* IP address
-* User
-* Session
-* Status code
-* Timestamp
-* User-Agent
-* Resource information
+### 🚨 Incident Management
 
-Example:
+* Retrieves and displays detected incidents.
+* Tracks incident severity and investigation status.
+* Provides individual incident details and associated event timelines.
+* Supports incident status updates.
 
-```text
-POST /api/demo/login
-IP: 192.168.1.10
-Status: 401
-Timestamp: 10:42:15
-```
+### 🕸️ Attack Graph Visualization
 
----
+TraceX represents incident-related activity as a graph of connected entities.
 
-## 🚨 Threat Detection
+The graph can include:
 
-TraceX analyzes collected events to identify suspicious behavior.
+* Source IP addresses
+* Security incidents
+* API request events
+* API endpoints
+* Associated users
+* Sessions
+* Accessed resources
 
-### Currently implemented
+Relationships such as `TRIGGERED`, `GENERATED`, `CALLED`, `ASSOCIATED WITH`, `USED`, and `ACCESSED` help investigators understand how recorded activity connects to an incident.
 
-#### Brute Force Detection
+### 📡 Event Explorer
 
-Detects repeated failed login attempts from the same IP within a time window.
+* Inspects events linked to incident timelines.
+* Searches event metadata such as IP addresses, endpoints, HTTP methods, and status codes.
+* Filters successful responses and HTTP errors.
+* Navigates from an event to its associated incident when available.
 
-```text
-5+ failed login attempts
-        ↓
-Detection Engine
-        ↓
-BRUTE_FORCE
-        ↓
-HIGH severity incident
-```
+### 🧪 Demo Mode
 
-### Planned Detection Rules
+The demo workflow generates sample API traffic to exercise the configured detection rules, making it easier to test and demonstrate the platform without manually sending every request.
 
-* Endpoint scanning
-* Abnormal administrative access
-* Data burst / unusual downloads
-* Multi-account attacks
+Detection results depend on the configured rules, request history, and authentication permissions.
 
----
+## Technology Stack
 
-## 🧩 Incident Management
+| Layer             | Technologies                 |
+| ----------------- | ---------------------------- |
+| Frontend          | React.js, JavaScript         |
+| Backend           | Node.js, Express.js          |
+| Database          | MongoDB, Mongoose            |
+| Authentication    | JWT-based authentication     |
+| API Monitoring    | Express middleware           |
+| Threat Detection  | Rule-based detection service |
+| Visualization     | SVG-based attack graph       |
+| Routing           | React Router                 |
+| Development Tools | Git, GitHub, npm, Postman    |
 
-Detected activity is converted into an **Incident** containing:
-
-* Incident type
-* Severity
-* Source IP
-* Start time
-* End time
-* Status
-* Description
-
-Incident states:
+## System Architecture
 
 ```text
-OPEN
-  ↓
-INVESTIGATING
-  ↓
-RESOLVED
+          API Requests
+               |
+               v
+       Express.js Server
+               |
+               v
+      Central Event Logger
+               |
+               v
+        MongoDB Events
+               |
+               v
+       Detection Service
+               |
+       +-------+--------+
+       |                |
+       v                v
+  No Detection     Threat Detected
+                        |
+                        v
+                Incident Creation
+                        |
+             +----------+----------+
+             |                     |
+             v                     v
+       Incident Timeline      Attack Graph
+             |                     |
+             +----------+----------+
+                        |
+                        v
+                 React Dashboard
 ```
 
-Investigators can update the status directly from the dashboard.
-
----
-
-## 📊 Investigation Dashboard
-
-The dashboard provides an overview of the security environment.
-
-### Dashboard metrics
-
-* Total incidents
-* Open incidents
-* High-severity incidents
-* Incidents under investigation
-
-Investigators can select an incident to open its complete investigation view.
-
----
-
-## 🔎 Incident Investigation
-
-Each incident contains multiple investigation views.
-
-### Timeline
-
-Events associated with an incident are displayed chronologically.
-
-```text
-10:40:01  POST /login     401
-10:40:08  POST /login     401
-10:40:14  POST /login     401
-10:40:21  POST /login     401
-10:40:29  POST /login     401
-                    ↓
-             Brute Force
-```
-
-### Investigation Graph
-
-TraceX converts incident activity into a relationship graph:
-
-```text
-                 ┌─────────────┐
-                 │   INCIDENT  │
-                 └──────▲──────┘
-                        │
-                     TRIGGERED
-                        │
-                 ┌──────┴──────┐
-                 │      IP     │
-                 └──────┬──────┘
-                        │
-                    GENERATED
-                        │
-                 ┌──────▼──────┐
-                 │    EVENT    │
-                 └──────┬──────┘
-                        │
-                      CALLED
-                        │
-                 ┌──────▼──────┐
-                 │     API     │
-                 └─────────────┘
-```
-
-This helps investigators understand the relationship between:
-
-* IP addresses
-* Events
-* APIs
-* Incidents
-
----
-
-## 🧪 Demo Application
-
-TraceX includes a controlled demo application that generates application activity for investigation.
-
-### Demo endpoints
-
-```text
-POST /api/demo/login
-GET  /api/demo/users
-GET  /api/demo/orders
-GET  /api/demo/files
-GET  /api/demo/admin/users
-```
-
-The demo application allows security scenarios to be reproduced without interacting with external systems.
-
----
-
-## 🏗️ Architecture
-
-```text
-                  Demo Application
-                         │
-                         ▼
-                ┌─────────────────┐
-                │   TraceX API    │
-                │ Node + Express  │
-                └────────┬────────┘
-                         │
-                Event Collection
-                         │
-                         ▼
-                ┌─────────────────┐
-                │     MongoDB     │
-                │ Events/Incidents│
-                └────────┬────────┘
-                         │
-                         ▼
-                ┌─────────────────┐
-                │ Detection Engine│
-                └────────┬────────┘
-                         │
-                         ▼
-                    Incident
-                         │
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-           Timeline     Graph    Impact Analysis
-              │          │          │
-              └──────────┼──────────┘
-                         ▼
-                React Investigation
-                    Dashboard
-```
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-
-* React
-* Vite
-* Tailwind CSS
-* React Router
-* Axios
-* React Flow
-
-### Backend
-
-* Node.js
-* Express.js
-* MongoDB
-* Mongoose
-* JWT
-* bcryptjs
-
-### Planned Infrastructure
-
-* Redis
-* Socket.IO
-* BullMQ
-* Docker
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```text
 TraceX/
-│
-├── backend/
-│   ├── src/
-│   │   ├── config/
-│   │   │   └── db.js
-│   │   │
-│   │   ├── controllers/
-│   │   │   └── incidentController.js
-│   │   │
-│   │   ├── demo/
-│   │   │   └── demoRoutes.js
-│   │   │
-│   │   ├── middleware/
-│   │   │   ├── authMiddleware.js
-│   │   │   └── eventLogger.js
-│   │   │
-│   │   ├── models/
-│   │   │   ├── User.js
-│   │   │   ├── Event.js
-│   │   │   └── Incident.js
-│   │   │
-│   │   ├── routes/
-│   │   │   ├── authRoutes.js
-│   │   │   ├── userRoutes.js
-│   │   │   └── incidentRoutes.js
-│   │   │
-│   │   ├── services/
-│   │   │   └── detectionService.js
-│   │   │
-│   │   └── server.js
-│   │
-│   ├── package.json
-│   └── .gitignore
-│
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   │   ├── Login.jsx
-│   │   │   ├── Dashboard.jsx
-│   │   │   └── IncidentDetails.jsx
-│   │   │
-│   │   ├── services/
-│   │   │   └── api.js
-│   │   │
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   │
-│   └── package.json
+│   └── src/
+│       ├── components/
+│       ├── pages/
+│       │   ├── Dashboard.jsx
+│       │   ├── Incidents.jsx
+│       │   ├── IncidentDetails.jsx
+│       │   ├── EventExplorer.jsx
+│       │   ├── DetectionEngine.jsx
+│       │   └── AttackGraph.jsx
+│       └── services/
+│           └── api.js
 │
-└── README.md
+└── backend/
+    └── src/
+        ├── config/
+        ├── controllers/
+        │   └── incidentController.js
+        ├── demo/
+        │   └── demoRoutes.js
+        ├── middleware/
+        │   ├── authMiddleware.js
+        │   └── eventLogger.js
+        ├── models/
+        │   ├── User.js
+        │   ├── Incident.js
+        │   └── Event.js
+        ├── routes/
+        │   ├── authRoutes.js
+        │   ├── userRoutes.js
+        │   ├── incidentRoutes.js
+        │   └── attackChainRoutes.js
+        ├── services/
+        │   └── detectionService.js
+        └── server.js
 ```
 
----
+*The structure above reflects the main modules; your local repository may contain additional files or different filenames.*
 
-## ⚙️ Getting Started
+## Getting Started
 
-### 1. Clone the repository
+### Prerequisites
+
+Install the following before running TraceX:
+
+* Node.js and npm
+* MongoDB Atlas account or a local MongoDB instance
+* Git
+
+### 1. Clone the Repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/tchandok30/TraceX.git
 cd TraceX
 ```
 
-### 2. Backend setup
+### 2. Configure the Backend
+
+Navigate to the backend directory:
 
 ```bash
 cd backend
 npm install
 ```
 
-Create `.env`:
+Create a `.env` file using the environment variable names expected by your backend configuration. For example:
 
 ```env
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_jwt_secret
 PORT=5000
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=your_secret_key
 ```
 
-Start the backend:
+Ensure that your MongoDB connection and JWT configuration use the variable names expected by your existing code. Never commit real credentials or secret keys.
+
+Start the backend using the script defined in `backend/package.json`. If your project uses Nodemon, the command may be:
 
 ```bash
 npm run dev
 ```
 
-Backend runs on:
+The health endpoint is available at:
 
 ```text
-http://localhost:5000
+GET http://localhost:5000/api/health
 ```
 
-Test:
+### 3. Configure the Frontend
 
-```text
-GET /api/health
-```
-
----
-
-### 3. Frontend setup
-
-Open another terminal:
+Open a separate terminal:
 
 ```bash
 cd frontend
@@ -368,163 +210,79 @@ npm install
 npm run dev
 ```
 
-The Vite development server will provide the frontend URL.
-
----
-
-## 🔄 How TraceX Works
-
-A typical investigation follows this flow:
+Configure the frontend API base URL to point to your backend, typically:
 
 ```text
-1. Application receives request
-             ↓
-2. Event Logger records activity
-             ↓
-3. Event stored in MongoDB
-             ↓
-4. Detection Engine analyzes activity
-             ↓
-5. Suspicious behavior detected
-             ↓
-6. Incident created
-             ↓
-7. Related events attached to incident
-             ↓
-8. Investigator opens incident
-             ↓
-9. Timeline + Graph reveal activity
-             ↓
-10. Investigator updates incident status
+http://localhost:5000/api
 ```
 
----
+Open the local frontend URL printed by Vite in your terminal.
 
-## 🧠 Example: Brute Force Investigation
+### 4. Explore TraceX
 
-Suppose an attacker repeatedly attempts to log into the demo application.
+1. Log in using an account configured in your application.
+2. Open the dashboard.
+3. Run the demo to generate sample API traffic.
+4. Check the incidents created by the detection service.
+5. Open the Event Explorer to inspect incident-linked events.
+6. Open an incident's details or Attack Graph to explore its associated entities and relationships.
+
+## API Overview
+
+The following endpoints are defined by the current backend routing structure.
+
+| Method | Endpoint                      | Purpose                                         |
+| ------ | ----------------------------- | ----------------------------------------------- |
+| GET    | `/api/health`                 | Check server health                             |
+| `/`    | `/api/auth`                   | Authentication routes mounted under this prefix |
+| `/`    | `/api/users`                  | User routes mounted under this prefix           |
+| GET    | `/api/incidents`              | Retrieve incidents                              |
+| GET    | `/api/incidents/:id`          | Retrieve an incident                            |
+| GET    | `/api/incidents/:id/timeline` | Retrieve incident-linked events                 |
+| GET    | `/api/incidents/:id/graph`    | Generate incident graph data                    |
+| PATCH  | `/api/incidents/:id/status`   | Update incident status                          |
+| `/`    | `/api/demo`                   | Demo routes mounted under this prefix           |
+| `/`    | `/api/attack-chains`          | Attack-chain routes mounted under this prefix   |
+
+The demo endpoint used by the frontend is:
 
 ```text
-POST /login → 401
-POST /login → 401
-POST /login → 401
-POST /login → 401
-POST /login → 401
+POST /api/demo/run-demo
 ```
 
-TraceX detects the pattern:
+Authentication requirements and available methods depend on the individual route handlers.
 
-```text
-Failed Login Events
-        ↓
-Same Source IP
-        ↓
-5+ Attempts / 5 Minutes
-        ↓
-Brute Force Detection
-        ↓
-HIGH Severity Incident
-```
+## Security Detection Workflow
 
-The investigator can then inspect:
+TraceX follows a straightforward investigation workflow:
 
-* Source IP
-* Number of events
-* Exact event timeline
-* API involved
-* Incident graph
-* Current investigation status
+1. **Collect:** Capture API request metadata through Express middleware.
+2. **Analyze:** Evaluate event data against configured detection rules.
+3. **Detect:** Identify request patterns that match a rule.
+4. **Record:** Create a security incident when a threat is detected.
+5. **Investigate:** Review the incident and its linked event timeline.
+6. **Visualize:** Explore relationships between the incident and associated entities.
+
+## Future Enhancements
+
+* Advanced correlation of events across users, sessions, and source IPs.
+* Interactive graph controls, including zoom, pan, and relationship filtering.
+* Configurable detection thresholds and rule management.
+* Incident prioritization and investigation notes.
+* Improved analytics for request frequency and suspicious access patterns.
+* Automated testing for detection rules and incident creation.
+* Expanded audit logging and security monitoring dashboards.
+
+## Why TraceX?
+
+Traditional application logs can be difficult to investigate when suspicious requests are scattered across endpoints and timestamps. TraceX brings request telemetry, rule-based detection, incident timelines, and relationship visualization into one investigation workflow.
+
+The goal is to make suspicious API activity easier to identify, trace, and investigate.
+
+## Disclaimer
+
+TraceX is a security monitoring and educational project. Run its demo and testing workflows only in environments you own or are authorized to test. Detection accuracy depends on the implemented rules, available event data, and configuration.
 
 ---
 
-## 🗺️ Roadmap
-
-### Phase 1 — Core Platform
-
-* [x] Express backend
-* [x] MongoDB integration
-* [x] User authentication
-* [x] JWT authorization
-* [x] Demo application
-* [x] Event collection
-
-### Phase 2 — Detection & Investigation
-
-* [x] Brute-force detection
-* [x] Incident creation
-* [x] Incident dashboard
-* [x] Incident timeline
-* [x] Investigation graph
-* [x] Incident status management
-
-### Phase 3 — Advanced Detection
-
-* [ ] Endpoint scanning detection
-* [ ] Abnormal access detection
-* [ ] Data burst detection
-* [ ] Multi-account attack detection
-* [ ] Security Lab
-
-### Phase 4 — Advanced Investigation
-
-* [ ] IP pivot investigation
-* [ ] User pivot investigation
-* [ ] Blast-radius analysis
-* [ ] Incident replay
-* [ ] Incident DNA comparison
-
-### Phase 5 — Real-Time Infrastructure
-
-* [ ] Redis
-* [ ] Socket.IO
-* [ ] BullMQ
-* [ ] Real-time incident updates
-* [ ] Background detection jobs
-
-### Phase 6 — Response
-
-* [ ] Session revocation
-* [ ] IP blocking
-* [ ] Force re-authentication
-* [ ] API-key disabling
-* [ ] Controlled automated response
-
----
-
-## 🔒 Security Considerations
-
-TraceX is designed as a **controlled application-security investigation environment**.
-
-* Authentication uses JWT.
-* Passwords are hashed using bcrypt.
-* Protected APIs require authentication.
-* Security scenarios are generated against the project's own demo application.
-* Secrets and database credentials are stored in environment variables.
-
-> **Note:** TraceX is currently a development/educational project and should not be treated as a production-grade security monitoring system without additional security hardening.
-
----
-
-## 🎯 Project Goal
-
-TraceX aims to move beyond traditional application logs by transforming raw application activity into an **investigable incident story**:
-
-```text
-Raw Events
-    ↓
-Patterns
-    ↓
-Incidents
-    ↓
-Timeline
-    ↓
-Relationships
-    ↓
-Impact
-    ↓
-Investigation
-    ↓
-Response
-```
-
-**TraceX — From suspicious event to complete incident story.**
+**Built with React, Node.js, Express, and MongoDB.**

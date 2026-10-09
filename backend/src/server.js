@@ -4,7 +4,7 @@ const dotenv = require("dotenv");
 
 const connectDB = require("./config/db");
 const eventLogger = require("./middleware/eventLogger");
-
+const attackChainRoutes = require("./routes/attackChainRoutes");
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const incidentRoutes = require("./routes/incidentRoutes");
@@ -32,7 +32,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/incidents", incidentRoutes);
 app.use("/api/demo", demoRoutes);
-
+app.use("/api/attack-chains", attackChainRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {

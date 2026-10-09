@@ -14,6 +14,8 @@ import Dashboard from "./pages/Dashboard";
 import Incidents from "./pages/Incidents";
 import IncidentDetails from "./pages/IncidentDetails";
 import EventExplorer from "./pages/EventExplorer";
+import DetectionEngine from "./pages/DetectionEngine";
+import AttackGraph from "./pages/AttackGraph";
 import AppLayout from "./components/AppLayout";
 
 function ProtectedLayout() {
@@ -29,7 +31,10 @@ function ProtectedLayout() {
       setToken(false);
     };
 
-    window.addEventListener("tracex:unauthorized", handleUnauthorized);
+    window.addEventListener(
+      "tracex:unauthorized",
+      handleUnauthorized
+    );
 
     return () => {
       window.removeEventListener(
@@ -39,7 +44,6 @@ function ProtectedLayout() {
     };
   }, []);
 
-  // Login ke bina protected pages access nahi honge
   if (!token || !localStorage.getItem("token")) {
     return (
       <Navigate
@@ -61,22 +65,36 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public route */}
         <Route path="/login" element={<Login />} />
 
-        {/* Protected routes */}
         <Route element={<ProtectedLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/incidents" element={<Incidents />} />
-          <Route path="/incidents/:id" element={<IncidentDetails />} />
+          <Route
+            path="/incidents/:id"
+            element={<IncidentDetails />}
+          />
           <Route path="/events" element={<EventExplorer />} />
+
+          <Route
+            path="/detection-engine"
+            element={<DetectionEngine />}
+          />
+          <Route
+            path="/attack-graph"
+            element={<AttackGraph />}
+          />
         </Route>
 
-        {/* Default redirects */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="/"
+          element={<Navigate to="/dashboard" replace />}
+        />
+        <Route
+          path="*"
+          element={<Navigate to="/dashboard" replace />}
+        />
       </Routes>
     </BrowserRouter>
   );
 }
-

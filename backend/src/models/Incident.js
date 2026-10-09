@@ -17,7 +17,10 @@ const incidentSchema = new mongoose.Schema(
             type: String,
             required: true
         },
-
+        lastSeen: {
+    type: Date,
+    default: Date.now
+},
         startTime: {
             type: Date,
             required: true

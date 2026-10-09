@@ -1,7 +1,16 @@
-
 const Event = require("../models/Event");
 const Incident = require("../models/Incident");
 const User = require("../models/User");
+const { correlateIncident } = require("./correlationService");
+
+// Safely run the correlation engine without breaking threat detection
+const safelyCorrelate = async (incident) => {
+    try {
+        await correlateIncident(incident._id);
+    } catch (error) {
+        console.error("Correlation failed:", error.message);
+    }
+};
 
 // 1. BRUTE FORCE DETECTION
 const detectBruteForce = async (event) => {
@@ -9,54 +18,37 @@ const detectBruteForce = async (event) => {
         Date.now() - 5 * 60 * 1000
     );
 
-    const failedLogins = await Event.countDocuments({
+    const filter = {
         ip: event.ip,
         endpoint: "/api/demo/login",
         method: "POST",
         statusCode: 401,
         timestamp: { $gte: fiveMinutesAgo }
-    });
+    };
+
+    const failedLogins = await Event.countDocuments(filter);
 
     if (failedLogins < 5) return null;
 
-    const existingIncident = await Incident.findOne({
+    let incident = await Incident.findOne({
         type: "BRUTE_FORCE",
         sourceIP: event.ip,
         status: { $in: ["OPEN", "INVESTIGATING"] }
     });
 
-    if (existingIncident) {
-        await Event.updateMany(
-            {
-                ip: event.ip,
-                endpoint: "/api/demo/login",
-                method: "POST",
-                statusCode: 401,
-                timestamp: { $gte: fiveMinutesAgo }
-            },
-            { $set: { incidentId: existingIncident._id } }
-        );
-
-        return existingIncident;
+    if (!incident) {
+        incident = await Incident.create({
+            type: "BRUTE_FORCE",
+            severity: "HIGH",
+            sourceIP: event.ip,
+            startTime: event.timestamp,
+            description:
+                `Multiple failed login attempts detected from ${event.ip}`
+        });
     }
 
-    const incident = await Incident.create({
-        type: "BRUTE_FORCE",
-        severity: "HIGH",
-        sourceIP: event.ip,
-        startTime: fiveMinutesAgo,
-        description:
-            `Multiple failed login attempts detected from ${event.ip}`
-    });
-
     await Event.updateMany(
-        {
-            ip: event.ip,
-            endpoint: "/api/demo/login",
-            method: "POST",
-            statusCode: 401,
-            timestamp: { $gte: fiveMinutesAgo }
-        },
+        filter,
         { $set: { incidentId: incident._id } }
     );
 
@@ -69,11 +61,13 @@ const detectEndpointScan = async (event) => {
         Date.now() - 5 * 60 * 1000
     );
 
-    const events = await Event.find({
+    const filter = {
         ip: event.ip,
         statusCode: 404,
         timestamp: { $gte: fiveMinutesAgo }
-    });
+    };
+
+    const events = await Event.find(filter).select("endpoint");
 
     const uniqueEndpoints = [
         ...new Set(events.map((item) => item.endpoint))
@@ -81,40 +75,25 @@ const detectEndpointScan = async (event) => {
 
     if (uniqueEndpoints.length < 5) return null;
 
-    const existingIncident = await Incident.findOne({
+    let incident = await Incident.findOne({
         type: "ENDPOINT_SCAN",
         sourceIP: event.ip,
         status: { $in: ["OPEN", "INVESTIGATING"] }
     });
 
-    if (existingIncident) {
-        await Event.updateMany(
-            {
-                ip: event.ip,
-                statusCode: 404,
-                timestamp: { $gte: fiveMinutesAgo }
-            },
-            { $set: { incidentId: existingIncident._id } }
-        );
-
-        return existingIncident;
+    if (!incident) {
+        incident = await Incident.create({
+            type: "ENDPOINT_SCAN",
+            severity: "MEDIUM",
+            sourceIP: event.ip,
+            startTime: event.timestamp,
+            description:
+                `Multiple unknown endpoints accessed from ${event.ip}`
+        });
     }
 
-    const incident = await Incident.create({
-        type: "ENDPOINT_SCAN",
-        severity: "MEDIUM",
-        sourceIP: event.ip,
-        startTime: fiveMinutesAgo,
-        description:
-            `Multiple unknown endpoints accessed from ${event.ip}`
-    });
-
     await Event.updateMany(
-        {
-            ip: event.ip,
-            statusCode: 404,
-            timestamp: { $gte: fiveMinutesAgo }
-        },
+        filter,
         { $set: { incidentId: incident._id } }
     );
 
@@ -138,29 +117,22 @@ const detectAbnormalAccess = async (event) => {
         return null;
     }
 
-    const existingIncident = await Incident.findOne({
+    let incident = await Incident.findOne({
         type: "ABNORMAL_ACCESS",
         sourceIP: event.ip,
         status: { $in: ["OPEN", "INVESTIGATING"] }
     });
 
-    if (existingIncident) {
-        await Event.updateOne(
-            { _id: event._id },
-            { $set: { incidentId: existingIncident._id } }
-        );
-
-        return existingIncident;
+    if (!incident) {
+        incident = await Incident.create({
+            type: "ABNORMAL_ACCESS",
+            severity: "HIGH",
+            sourceIP: event.ip,
+            startTime: event.timestamp,
+            description:
+                `Non-admin user ${user.email} was blocked from accessing the admin endpoint`
+        });
     }
-
-    const incident = await Incident.create({
-        type: "ABNORMAL_ACCESS",
-        severity: "HIGH",
-        sourceIP: event.ip,
-        startTime: event.timestamp,
-        description:
-            `Non-admin user ${user.email} was blocked from accessing the admin endpoint`
-    });
 
     await Event.updateOne(
         { _id: event._id },
@@ -170,18 +142,19 @@ const detectAbnormalAccess = async (event) => {
     return incident;
 };
 
-
-
+// 4. REQUEST FREQUENCY DETECTION
 const detectRequestFrequency = async (event) => {
     const oneMinuteAgo = new Date(
         Date.now() - 60 * 1000
     );
 
-    const requestCount = await Event.countDocuments({
+    const filter = {
         ip: event.ip,
         endpoint: { $regex: "^/api/demo/" },
         timestamp: { $gte: oneMinuteAgo }
-    });
+    };
+
+    const requestCount = await Event.countDocuments(filter);
 
     console.log("REQUEST FREQUENCY CHECK:", {
         ip: event.ip,
@@ -192,100 +165,82 @@ const detectRequestFrequency = async (event) => {
         return null;
     }
 
-    const existingIncident = await Incident.findOne({
+    let incident = await Incident.findOne({
         type: "REQUEST_FREQUENCY",
         sourceIP: event.ip,
         status: { $in: ["OPEN", "INVESTIGATING"] }
     });
 
-    if (existingIncident) {
-        await Event.updateMany(
-            {
-                ip: event.ip,
-                endpoint: { $regex: "^/api/demo/" },
-                timestamp: { $gte: oneMinuteAgo }
-            },
-            { $set: { incidentId: existingIncident._id } }
-        );
-
-        return existingIncident;
+    if (!incident) {
+        incident = await Incident.create({
+            type: "REQUEST_FREQUENCY",
+            severity: "MEDIUM",
+            sourceIP: event.ip,
+            startTime: event.timestamp,
+            description:
+                `High request frequency detected: ${requestCount} demo API requests within one minute from ${event.ip}`
+        });
     }
 
-    const incident = await Incident.create({
-        type: "REQUEST_FREQUENCY",
-        severity: "MEDIUM",
-        sourceIP: event.ip,
-        startTime: event.timestamp,
-        description:
-            `High request frequency detected: ${requestCount} demo API requests within one minute from ${event.ip}`
-    });
-
     await Event.updateMany(
-        {
-            ip: event.ip,
-            endpoint: { $regex: "^/api/demo/" },
-            timestamp: { $gte: oneMinuteAgo }
-        },
+        filter,
         { $set: { incidentId: incident._id } }
     );
 
     return incident;
 };
-// 4. CENTRAL DETECTION FUNCTION
+
+// 5. CENTRAL DETECTION FUNCTION
 const detectThreat = async (event) => {
     try {
-        // Brute Force
+        let incident = null;
+
+        // Brute force
         if (
             event.endpoint === "/api/demo/login" &&
             event.method === "POST" &&
             event.statusCode === 401
         ) {
-            const incident = await detectBruteForce(event);
-
-            if (incident) {
-                return { detected: true, incident };
-            }
+            incident = await detectBruteForce(event);
         }
 
-        // Endpoint Scan
-        if (event.statusCode === 404) {
-            const incident = await detectEndpointScan(event);
-
-            if (incident) {
-                return { detected: true, incident };
-            }
+        // Endpoint scan
+        if (!incident && event.statusCode === 404) {
+            incident = await detectEndpointScan(event);
         }
 
-        // Abnormal Access
+        // Abnormal access
         if (
+            !incident &&
             event.endpoint === "/api/demo/admin/users" &&
             event.method === "GET" &&
             event.statusCode === 403
         ) {
-            const incident = await detectAbnormalAccess(event);
-
-            if (incident) {
-                return { detected: true, incident };
-            }
+            incident = await detectAbnormalAccess(event);
         }
-        const incident = await detectRequestFrequency(event);
+
+        // Request frequency
+        if (!incident) {
+            incident = await detectRequestFrequency(event);
+        }
 
         if (incident) {
+            await safelyCorrelate(incident);
+
             return {
                 detected: true,
                 incident
             };
         }
+
         return { detected: false };
 
     } catch (error) {
-        console.log(
+        console.error(
             "Threat detection failed:",
             error.message
         );
 
-        // Request Frequency Anomaly
-        
         return { detected: false };
     }
 };

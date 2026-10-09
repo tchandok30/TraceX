@@ -1,1 +1,74 @@
 @import "tailwindcss";
+
+.attack-graph-canvas {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border-color, #263244);
+  border-radius: 12px;
+  background: var(--panel-bg, #0b1220);
+}
+
+.attack-graph-svg {
+  display: block;
+  width: 100%;
+  min-width: 650px;
+  height: auto;
+  min-height: 440px;
+}
+
+.attack-edge-label {
+  fill: #94a3b8;
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: #0b1220;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.attack-node-label {
+  fill: var(--text-primary, #e2e8f0);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.attack-node-type {
+  fill: #94a3b8;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+
+.attack-graph-node:focus {
+  outline: none;
+}
+
+.attack-graph-node:focus circle:first-of-type {
+  stroke-width: 4;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 18px 16px;
+}
+
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.graph-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+@media (max-width: 640px) {
+  .attack-graph-svg {
+    min-width: 700px;
+  }
+}
