@@ -1,1054 +1,981 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import cytoscape from "cytoscape";
 import {
   Activity,
   Network,
   RefreshCw,
   ShieldAlert,
   GitBranch,
-  X,
   Search,
-  ChevronRight,
+  X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
 } from "lucide-react";
-
 import api from "../services/api";
 import LoadingState, {
   EmptyState,
   ErrorState,
 } from "../components/LoadingState";
+import "./AttackGraph.css";
 
-const COLORS = {
-  INCIDENT: "#fb7185",
-  IP: "#fbbf24",
-  EVENT: "#60a5fa",
-  API: "#a78bfa",
-  USER: "#34d399",
+const NODE_COLORS = {
+  INCIDENT: "#f87171",
+  IP: "#60a5fa",
+  EVENT: "#a78bfa",
+  API: "#34d399",
+  USER: "#fbbf24",
   SESSION: "#22d3ee",
   RESOURCE: "#fb923c",
 };
 
-const COLUMN_INFO = [
-  { type: "IP", title: "SOURCE", subtitle: "Origin of activity" },
-  { type: "INCIDENT", title: "INCIDENT", subtitle: "Detected threat" },
-  { type: "EVENT", title: "EVENTS", subtitle: "Recorded requests" },
-  { type: "API", title: "ENTITIES", subtitle: "Related endpoints & identities" },
-];
-
-const styles = {
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 22,
-    color: "#e2e8f0",
-  },
-  heading: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-    flexWrap: "wrap",
-  },
-  eyebrow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    fontSize: 11,
-    fontWeight: 800,
-    letterSpacing: 2,
-    color: "#60a5fa",
-    marginBottom: 10,
-  },
-  h1: {
-    fontSize: "clamp(26px, 4vw, 34px)",
-    fontWeight: 800,
-    letterSpacing: -1,
-    margin: "0 0 8px",
-    color: "#f8fafc",
-  },
-  subtitle: {
-    margin: 0,
-    fontSize: 13,
-    lineHeight: 1.7,
-    color: "#94a3b8",
-    maxWidth: 650,
-  },
-  button: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: "11px 15px",
-    borderRadius: 10,
-    border: "1px solid #334155",
-    background: "#172235",
-    color: "#e2e8f0",
-    fontWeight: 700,
-    fontSize: 12,
-    cursor: "pointer",
-  },
-  panel: {
-    border: "1px solid #263449",
-    borderRadius: 16,
-    background: "linear-gradient(145deg, #111c2d, #0c1422)",
-    overflow: "hidden",
-    minWidth: 0,
-  },
-  panelHeader: {
-    padding: "18px 20px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 12,
-    borderBottom: "1px solid #263449",
-  },
-  panelTitle: {
-    margin: 0,
-    fontSize: 15,
-    fontWeight: 750,
-    color: "#f1f5f9",
-  },
-  panelSubtitle: {
-    margin: "6px 0 0",
-    fontSize: 12,
-    color: "#94a3b8",
-    lineHeight: 1.6,
-  },
-  pill: {
-    padding: "6px 9px",
-    borderRadius: 7,
-    background: "#1e293b",
-    border: "1px solid #334155",
-    color: "#cbd5e1",
-    fontSize: 10,
-    fontWeight: 800,
-    letterSpacing: 0.7,
-    whiteSpace: "nowrap",
-  },
-  select: {
-    width: "100%",
-    maxWidth: 650,
-    minWidth: 0,
-    padding: "12px 14px",
-    background: "#0b1320",
-    border: "1px solid #334155",
-    borderRadius: 10,
-    color: "#e2e8f0",
-    fontSize: 13,
-    outline: "none",
-  },
-  stats: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
-    gap: 12,
-  },
-  stat: {
-    padding: "17px 18px",
-    borderRadius: 13,
-    background: "#111c2d",
-    border: "1px solid #263449",
-  },
-  statLabel: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    fontSize: 11,
-    color: "#94a3b8",
-    fontWeight: 650,
-  },
-  statValue: {
-    marginTop: 12,
-    fontSize: 29,
-    fontWeight: 800,
-    color: "#f8fafc",
-  },
-  statHint: {
-    marginTop: 5,
-    color: "#64748b",
-    fontSize: 11,
-  },
-  canvas: {
-    padding: 18,
-    overflowX: "auto",
-    backgroundColor: "#0a111e",
-    backgroundImage:
-      "radial-gradient(circle at 1px 1px, #263449 1px, transparent 0)",
-    backgroundSize: "22px 22px",
-  },
-  legend: {
-    display: "flex",
-    gap: 14,
-    flexWrap: "wrap",
-    padding: "14px 20px",
-    borderBottom: "1px solid #263449",
-  },
-  legendItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: 7,
-    fontSize: 10,
-    color: "#a7b5c9",
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-  },
-  nodeGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 10,
-    padding: 18,
-  },
-  nodeCard: {
-    textAlign: "left",
-    padding: 13,
-    background: "#101b2b",
-    border: "1px solid #2b3a50",
-    borderRadius: 11,
-    color: "#e2e8f0",
-    cursor: "pointer",
-    minWidth: 0,
-  },
-  detail: {
-    padding: 20,
-    minWidth: 0,
-  },
-  detailLabel: {
-    fontSize: 10,
-    color: "#94a3b8",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 7,
-  },
-  detailValue: {
-    fontSize: 13,
-    color: "#e2e8f0",
-    overflowWrap: "anywhere",
-  },
-  relationshipRow: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
-    alignItems: "center",
-    gap: 12,
-    padding: "13px 18px",
-    borderBottom: "1px solid #202e41",
-  },
+const SEVERITY_COLORS = {
+  CRITICAL: "#f87171",
+  HIGH: "#fb923c",
+  MEDIUM: "#fbbf24",
+  LOW: "#34d399",
 };
 
-function getList(payload, key) {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.[key])) return payload[key];
-  if (Array.isArray(payload?.data)) return payload.data;
-  return [];
+function getNodeLabel(node) {
+  return (
+    node.label ||
+    node.name ||
+    node.ip ||
+    node.endpoint ||
+    node.type ||
+    node.id ||
+    "Unknown node"
+  );
 }
 
-function shortText(value, max = 27) {
-  const text = String(value ?? "Unknown");
-  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
-}
+function normalizeGraph(graph) {
+  const rawNodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const rawEdges = Array.isArray(graph?.edges) ? graph.edges : [];
 
-function getNodeColumn(type) {
-  if (type === "IP") return 0;
-  if (type === "INCIDENT") return 1;
-  if (type === "EVENT") return 2;
-  return 3;
-}
+  const nodes = rawNodes.map((node, index) => {
+    const id = String(node.id ?? node._id ?? `node-${index}`);
+    const type = String(node.type || "EVENT").toUpperCase();
 
-function makeLayout(nodes, width = 1120) {
-  const columnX = [100, 365, 630, 955];
-  const top = 100;
-  const gap = 100;
-
-  const grouped = [[], [], [], []];
-
-  nodes.forEach((node) => {
-    grouped[getNodeColumn(node.type)].push(node);
+    return {
+      ...node,
+      id,
+      type,
+      label: String(getNodeLabel({ ...node, id })),
+    };
   });
 
-  const maxCount = Math.max(1, ...grouped.map((group) => group.length));
-  const height = Math.max(460, top + maxCount * gap + 35);
-  const positions = {};
+  const nodeIds = new Set(nodes.map((node) => node.id));
 
-  grouped.forEach((group, column) => {
-    group.forEach((node, index) => {
-      positions[node.id] = {
-        x: columnX[column],
-        y: top + index * gap,
-      };
-    });
-  });
+  const edges = rawEdges
+    .map((edge, index) => ({
+      id: String(edge.id ?? `edge-${index}`),
+      source: String(edge.source ?? edge.from ?? ""),
+      target: String(edge.target ?? edge.to ?? ""),
+      relationship: String(
+        edge.relationship ?? edge.label ?? edge.type ?? "RELATED_TO"
+      ),
+    }))
+    .filter(
+      (edge) =>
+        nodeIds.has(edge.source) &&
+        nodeIds.has(edge.target) &&
+        edge.source !== edge.target
+    );
 
-  return { positions, height, width };
+  return { nodes, edges };
+}
+
+function getSeverity(incident) {
+  return String(incident?.severity || "UNKNOWN").toUpperCase();
+}
+
+function formatDate(value) {
+  if (!value) return "Not available";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleString();
 }
 
 export default function AttackGraph() {
+  const graphContainerRef = useRef(null);
+  const cyRef = useRef(null);
+
   const [incidents, setIncidents] = useState([]);
-  const [graph, setGraph] = useState(null);
-  const [selectedIncidentId, setSelectedIncidentId] = useState("");
+  const [incidentId, setIncidentId] = useState("");
+  const [graphData, setGraphData] = useState({
+    nodes: [],
+    edges: [],
+  });
+  const [incidentDetails, setIncidentDetails] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState("");
+  const [loadingIncidents, setLoadingIncidents] = useState(true);
+  const [loadingGraph, setLoadingGraph] = useState(false);
   const [error, setError] = useState("");
+  const [graphError, setGraphError] = useState("");
 
-  const loadData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
+  const loadIncidents = useCallback(async () => {
+    setLoadingIncidents(true);
     setError("");
 
     try {
       const response = await api.get("/incidents");
-      const list = getList(response.data, "incidents");
+
+      const payload = response.data;
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.incidents)
+          ? payload.incidents
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
 
       setIncidents(list);
 
-      if (!list.length) {
-        setGraph(null);
-        setSelectedIncidentId("");
-        setSelectedNode(null);
-        return;
-      }
+      setIncidentId((current) => {
+        if (current && list.some((item) => String(item._id) === current)) {
+          return current;
+        }
 
-      const chosen = list.some(
-        (incident) => String(incident._id) === String(selectedIncidentId)
-      )
-        ? selectedIncidentId
-        : list[0]._id;
-
-      setSelectedIncidentId(chosen);
-
-      const graphResponse = await api.get(
-        `/incidents/${chosen}/graph`
-      );
-
-      setGraph(graphResponse.data);
-      setSelectedNode(null);
+        return list[0]?._id ? String(list[0]._id) : "";
+      });
     } catch (err) {
       setError(
         err.response?.data?.message ||
           err.message ||
-          "Unable to load attack graph."
+          "Unable to load incidents."
       );
     } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [selectedIncidentId]);
-
-  const chooseIncident = useCallback(async (incidentId) => {
-    setSelectedIncidentId(incidentId);
-    setSelectedNode(null);
-    setError("");
-    setLoading(true);
-
-    try {
-      const response = await api.get(
-        `/incidents/${incidentId}/graph`
-      );
-      setGraph(response.data);
-    } catch (err) {
-      setGraph(null);
-      setError(
-        err.response?.data?.message ||
-          err.message ||
-          "Unable to load the selected incident graph."
-      );
-    } finally {
-      setLoading(false);
+      setLoadingIncidents(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const loadGraph = useCallback(async () => {
+    if (!incidentId) {
+      setGraphData({ nodes: [], edges: [] });
+      setIncidentDetails(null);
+      setSelectedNode(null);
+      return;
+    }
 
-  const nodes = useMemo(() => graph?.nodes || [], [graph]);
-  const edges = useMemo(() => graph?.edges || [], [graph]);
+    setLoadingGraph(true);
+    setGraphError("");
+    setSelectedNode(null);
+
+    try {
+      const response = await api.get(
+        `/incidents/${encodeURIComponent(incidentId)}/graph`
+      );
+
+      const payload = response.data?.data ?? response.data;
+
+      const normalized = normalizeGraph(payload);
+
+      setGraphData(normalized);
+      setIncidentDetails(payload?.incident ?? null);
+    } catch (err) {
+      setGraphData({ nodes: [], edges: [] });
+      setIncidentDetails(null);
+      setGraphError(
+        err.response?.data?.message ||
+          err.message ||
+          "Unable to load the incident graph."
+      );
+    } finally {
+      setLoadingGraph(false);
+    }
+  }, [incidentId]);
+
+  useEffect(() => {
+    loadIncidents();
+  }, [loadIncidents]);
+
+  useEffect(() => {
+    loadGraph();
+  }, [loadGraph]);
+
+  const currentIncident = useMemo(
+    () =>
+      incidents.find((item) => String(item._id) === String(incidentId)) ||
+      incidentDetails,
+    [incidents, incidentId, incidentDetails]
+  );
 
   const filteredNodes = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return nodes;
+    const query = search.trim().toLowerCase();
 
-    return nodes.filter((node) =>
+    if (!query) return graphData.nodes;
+
+    return graphData.nodes.filter((node) =>
       [
         node.label,
         node.type,
         node.id,
-        node.details?.ip,
-        node.details?.endpoint,
-        node.details?.userId,
-      ].some((value) =>
-        String(value ?? "").toLowerCase().includes(term)
-      )
+        node.ip,
+        node.endpoint,
+        node.relationship,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
     );
-  }, [nodes, query]);
+  }, [graphData.nodes, search]);
 
-  const layout = useMemo(
-    () => makeLayout(filteredNodes),
-    [filteredNodes]
-  );
-
-  const visibleIds = useMemo(
+  const visibleNodeIds = useMemo(
     () => new Set(filteredNodes.map((node) => node.id)),
     [filteredNodes]
   );
 
-  const visibleEdges = useMemo(
+  const filteredEdges = useMemo(
     () =>
-      edges.filter(
+      graphData.edges.filter(
         (edge) =>
-          visibleIds.has(edge.source) &&
-          visibleIds.has(edge.target)
+          visibleNodeIds.has(edge.source) &&
+          visibleNodeIds.has(edge.target)
       ),
-    [edges, visibleIds]
+    [graphData.edges, visibleNodeIds]
   );
 
-  const incident = incidents.find(
-    (item) => String(item._id) === String(selectedIncidentId)
-  );
+  const stats = useMemo(() => {
+    const counts = {};
 
-  if (loading && !graph) {
-    return <LoadingState label="Building attack graph..." />;
+    graphData.nodes.forEach((node) => {
+      counts[node.type] = (counts[node.type] || 0) + 1;
+    });
+
+    return {
+      nodes: graphData.nodes.length,
+      edges: graphData.edges.length,
+      ips: counts.IP || 0,
+      events: counts.EVENT || 0,
+    };
+  }, [graphData]);
+
+  useEffect(() => {
+    const container = graphContainerRef.current;
+
+    if (!container || loadingGraph || graphError || !incidentId) {
+      return;
+    }
+
+    const elements = [
+      ...graphData.nodes.map((node) => ({
+        group: "nodes",
+        data: {
+          id: node.id,
+          label:
+            node.label.length > 28
+              ? `${node.label.slice(0, 25)}...`
+              : node.label,
+          fullLabel: node.label,
+          type: node.type,
+          color: NODE_COLORS[node.type] || "#94a3b8",
+          details: JSON.stringify(node, null, 2),
+        },
+      })),
+      ...graphData.edges.map((edge) => ({
+        group: "edges",
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: edge.relationship.replaceAll("_", " "),
+          relationship: edge.relationship,
+        },
+      })),
+    ];
+
+    const cy = cytoscape({
+      container,
+      elements,
+      minZoom: 0.2,
+      maxZoom: 3,
+      wheelSensitivity: 0.25,
+      layout: {
+        name: "cose",
+        animate: true,
+        animationDuration: 450,
+        fit: true,
+        padding: 55,
+        nodeRepulsion: () => 8500,
+        idealEdgeLength: () => 130,
+        gravity: 0.25,
+        numIter: 700,
+      },
+      style: [
+        {
+          selector: "node",
+          style: {
+            label: "data(label)",
+            "background-color": "data(color)",
+            color: "#e2e8f0",
+            "font-size": 10,
+            "font-weight": 600,
+            "text-wrap": "wrap",
+            "text-max-width": 125,
+            width: 25,
+            height: 25,
+            "border-width": 2,
+            "border-color": "data(color)",
+            "border-opacity": 0.9,
+            "text-valign": "bottom",
+            "text-halign": "center",
+            "text-margin-y": 9,
+            "overlay-opacity": 0,
+          },
+        },
+        {
+          selector: "node[type = 'INCIDENT']",
+          style: {
+            width: 40,
+            height: 40,
+            shape: "round-rectangle",
+            "border-width": 3,
+          },
+        },
+        {
+          selector: "node[type = 'IP']",
+          style: { shape: "diamond" },
+        },
+        {
+          selector: "node[type = 'API']",
+          style: { shape: "round-rectangle" },
+        },
+        {
+          selector: "edge",
+          style: {
+            width: 1.5,
+            "line-color": "#475569",
+            "target-arrow-color": "#64748b",
+            "target-arrow-shape": "triangle",
+            "curve-style": "bezier",
+            "arrow-scale": 0.8,
+            label: "data(label)",
+            color: "#94a3b8",
+            "font-size": 8,
+            "text-rotation": "autorotate",
+            "text-background-color": "#0a111e",
+            "text-background-opacity": 0.9,
+            "text-background-padding": 3,
+            "overlay-opacity": 0,
+          },
+        },
+        {
+          selector: "node:selected",
+          style: {
+            "border-color": "#ffffff",
+            "border-width": 4,
+            "shadow-blur": 16,
+            "shadow-color": "data(color)",
+            "shadow-opacity": 0.7,
+          },
+        },
+        {
+          selector: "edge:selected",
+          style: {
+            width: 3,
+            "line-color": "#60a5fa",
+            "target-arrow-color": "#60a5fa",
+          },
+        },
+        {
+          selector: ".dimmed",
+          style: { opacity: 0.15 },
+        },
+        {
+          selector: ".matched",
+          style: {
+            "border-color": "#ffffff",
+            "border-width": 4,
+          },
+        },
+      ],
+    });
+
+    cyRef.current = cy;
+
+    cy.on("tap", "node", (event) => {
+      const element = event.target;
+      const node = graphData.nodes.find(
+        (item) => item.id === element.id()
+      );
+
+      if (node) setSelectedNode(node);
+    });
+
+    cy.on("tap", "edge", (event) => {
+      const edge = event.target.data();
+
+      setSelectedNode({
+        id: edge.id,
+        type: "RELATIONSHIP",
+        label: edge.relationship,
+        source: edge.source,
+        target: edge.target,
+        relationship: edge.relationship,
+      });
+    });
+
+    cy.on("tap", (event) => {
+      if (event.target === cy) setSelectedNode(null);
+    });
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (!cy.destroyed()) cy.resize();
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+      cy.destroy();
+      if (cyRef.current === cy) cyRef.current = null;
+    };
+  }, [graphData, incidentId, loadingGraph, graphError]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+
+    if (!cy || cy.destroyed()) return;
+
+    const query = search.trim().toLowerCase();
+
+    cy.elements().removeClass("dimmed matched");
+
+    if (!query) return;
+
+    const matchingNodes = cy.nodes().filter((node) => {
+      const data = node.data();
+
+      return (
+        String(data.fullLabel).toLowerCase().includes(query) ||
+        String(data.type).toLowerCase().includes(query) ||
+        String(data.id).toLowerCase().includes(query)
+      );
+    });
+
+    if (matchingNodes.length > 0) {
+      cy.elements().addClass("dimmed");
+      matchingNodes.removeClass("dimmed").addClass("matched");
+      matchingNodes.connectedEdges().removeClass("dimmed");
+      matchingNodes.connectedEdges().connectedNodes().removeClass("dimmed");
+    }
+  }, [search]);
+
+  const resetGraph = () => {
+    const cy = cyRef.current;
+
+    if (cy && !cy.destroyed()) {
+      cy.elements().removeClass("dimmed matched");
+      cy.layout({
+        name: "cose",
+        animate: true,
+        padding: 55,
+        nodeRepulsion: () => 8500,
+        idealEdgeLength: () => 130,
+        numIter: 500,
+      }).run();
+      cy.fit(undefined, 45);
+    }
+
+    setSearch("");
+    setSelectedNode(null);
+  };
+
+  const zoomIn = () => {
+    const cy = cyRef.current;
+    if (cy && !cy.destroyed()) {
+      cy.zoom({
+        level: cy.zoom() * 1.2,
+        renderedPosition: {
+          x: cy.width() / 2,
+          y: cy.height() / 2,
+        },
+      });
+    }
+  };
+
+  const zoomOut = () => {
+    const cy = cyRef.current;
+    if (cy && !cy.destroyed()) {
+      cy.zoom({
+        level: cy.zoom() / 1.2,
+        renderedPosition: {
+          x: cy.width() / 2,
+          y: cy.height() / 2,
+        },
+      });
+    }
+  };
+
+  const focusNode = (node) => {
+    setSelectedNode(node);
+
+    const cy = cyRef.current;
+
+    if (!cy || cy.destroyed()) return;
+
+    const element = cy.getElementById(node.id);
+
+    if (element.length) {
+      cy.elements().removeClass("dimmed matched");
+      cy.animate({
+        center: { eles: element },
+        zoom: Math.max(cy.zoom(), 1),
+        duration: 350,
+      });
+      element.select();
+    }
+  };
+
+  if (loadingIncidents) {
+    return <LoadingState />;
   }
 
-  if (error && !graph) {
+  if (error) {
     return (
-      <ErrorState
-        message={error}
-        onRetry={() => loadData()}
-      />
+      <div className="attack-graph-page">
+        <ErrorState message={error} />
+        <button className="ag-button" onClick={loadIncidents}>
+          <RefreshCw size={15} />
+          Retry
+        </button>
+      </div>
     );
   }
 
   return (
-    <div style={styles.page}>
-      <section style={styles.heading}>
+    <div className="attack-graph-page">
+      <header className="ag-heading">
         <div>
-          <div style={styles.eyebrow}>
-            <Network size={14} />
-            TRACE X / RELATIONSHIP ANALYSIS
+          <div className="ag-eyebrow">
+            <ShieldAlert size={15} />
+            SECURITY INVESTIGATION
           </div>
-          <h1 style={styles.h1}>Attack Graph</h1>
-          <p style={styles.subtitle}>
-            Trace incident-linked activity across source IPs, requests,
-            endpoints and associated entities.
+
+          <h1 className="ag-title">Attack Graph</h1>
+
+          <p className="ag-subtitle">
+            Explore the connections between incidents, IP addresses,
+            events, APIs and other entities to investigate suspicious
+            activity.
           </p>
         </div>
 
         <button
-          style={{
-            ...styles.button,
-            opacity: refreshing ? 0.65 : 1,
+          className="ag-button"
+          onClick={() => {
+            loadIncidents();
+            loadGraph();
           }}
-          onClick={() => loadData(true)}
-          disabled={refreshing || loading}
+          disabled={loadingGraph}
         >
           <RefreshCw size={15} />
-          {refreshing ? "Refreshing..." : "Refresh graph"}
+          Refresh
         </button>
+      </header>
+
+      <section className="ag-stats">
+        <div className="ag-stat">
+          <div className="ag-stat-label">
+            <ShieldAlert size={15} />
+            Severity
+          </div>
+          <div
+            className="ag-stat-value"
+            style={{
+              color:
+                SEVERITY_COLORS[getSeverity(currentIncident)] || "#f8fafc",
+              fontSize: 21,
+            }}
+          >
+            {getSeverity(currentIncident)}
+          </div>
+          <div className="ag-stat-hint">Selected incident</div>
+        </div>
+
+        <div className="ag-stat">
+          <div className="ag-stat-label">
+            <Network size={15} />
+            Graph nodes
+          </div>
+          <div className="ag-stat-value">{stats.nodes}</div>
+          <div className="ag-stat-hint">Connected entities</div>
+        </div>
+
+        <div className="ag-stat">
+          <div className="ag-stat-label">
+            <GitBranch size={15} />
+            Relationships
+          </div>
+          <div className="ag-stat-value">{stats.edges}</div>
+          <div className="ag-stat-hint">Graph connections</div>
+        </div>
+
+        <div className="ag-stat">
+          <div className="ag-stat-label">
+            <Activity size={15} />
+            IP addresses
+          </div>
+          <div className="ag-stat-value">{stats.ips}</div>
+          <div className="ag-stat-hint">
+            {stats.events} event nodes
+          </div>
+        </div>
       </section>
 
-      {error && (
-        <div
-          role="alert"
-          style={{
-            padding: 13,
-            borderRadius: 10,
-            background: "#451a1a",
-            border: "1px solid #7f1d1d",
-            color: "#fecaca",
-            fontSize: 12,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      <section style={styles.panel}>
-        <div style={styles.panelHeader}>
+      <section className="ag-panel">
+        <div className="ag-panel-header">
           <div>
-            <h2 style={styles.panelTitle}>Investigation scope</h2>
-            <p style={styles.panelSubtitle}>
-              Choose an incident to load its backend-generated relationships.
+            <h2 className="ag-panel-title">Incident selection</h2>
+            <p className="ag-panel-subtitle">
+              Choose an incident to load its relationship graph.
             </p>
           </div>
-          <span style={styles.pill}>
-            {incidents.length} INCIDENTS
+
+          <span className="ag-pill">
+            {incidents.length} INCIDENT{incidents.length === 1 ? "" : "S"}
           </span>
         </div>
 
-        <div style={{ padding: 18 }}>
+        <div className="ag-panel-body">
           {incidents.length === 0 ? (
             <EmptyState
-              title="No incidents available"
-              message="Run the demo or wait for the detection engine to record an incident."
+              title="No incidents found"
+              message="Generate demo security activity or wait for an incident to be detected."
             />
           ) : (
             <select
-              value={selectedIncidentId}
-              onChange={(event) => chooseIncident(event.target.value)}
-              disabled={loading}
-              style={styles.select}
+              className="ag-select"
+              value={incidentId}
+              onChange={(event) => setIncidentId(event.target.value)}
+              aria-label="Select incident"
             >
-              {incidents.map((item) => (
-                <option key={item._id} value={item._id}>
-                  {item.type || "Incident"} · {item.severity || "Unknown"} ·
-                  {" "}{String(item._id).slice(-7)}
+              {incidents.map((incident) => (
+                <option key={incident._id} value={String(incident._id)}>
+                  {incident.type || "Security incident"} —{" "}
+                  {getSeverity(incident)} —{" "}
+                  {String(incident._id).slice(-8)}
                 </option>
               ))}
             </select>
           )}
+
+          {currentIncident && (
+            <div style={{ marginTop: 16 }}>
+              <div className="ag-detail-grid">
+                <div>
+                  <div className="ag-detail-label">Incident type</div>
+                  <div className="ag-detail-value">
+                    {currentIncident.type || "Unknown"}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="ag-detail-label">Status</div>
+                  <div className="ag-detail-value">
+                    {currentIncident.status || "Unknown"}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="ag-detail-label">Detected</div>
+                  <div className="ag-detail-value">
+                    {formatDate(
+                      currentIncident.createdAt ||
+                        currentIncident.timestamp
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="ag-detail-label">Incident ID</div>
+              <div className="ag-detail-value" style={{ overflowWrap: "anywhere" }}>
+                {currentIncident._id}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
-      {graph && (
-        <>
-          <section style={styles.stats}>
-            <div style={styles.stat}>
-              <div style={styles.statLabel}>
-                <Network size={15} /> Graph nodes
-              </div>
-              <div style={styles.statValue}>{nodes.length}</div>
-              <div style={styles.statHint}>Entities in selected graph</div>
+      {graphError && (
+        <div className="ag-error">
+          <strong>Graph loading failed:</strong> {graphError}
+          <button
+            className="ag-button"
+            style={{ marginLeft: 12 }}
+            onClick={loadGraph}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      <section className="ag-panel">
+        <div className="ag-panel-header">
+          <div>
+            <h2 className="ag-panel-title">Interactive relationship map</h2>
+            <p className="ag-panel-subtitle">
+              Drag nodes, zoom, pan and select a node to inspect its
+              details.
+            </p>
+          </div>
+
+          <span className="ag-pill">CYTOSCAPE GRAPH</span>
+        </div>
+
+        <div className="ag-legend">
+          {Object.entries(NODE_COLORS).map(([type, color]) => (
+            <div className="ag-legend-item" key={type}>
+              <span
+                className="ag-legend-dot"
+                style={{ background: color }}
+              />
+              {type}
             </div>
+          ))}
+        </div>
 
-            <div style={styles.stat}>
-              <div style={styles.statLabel}>
-                <GitBranch size={15} /> Relationships
-              </div>
-              <div style={styles.statValue}>{edges.length}</div>
-              <div style={styles.statHint}>Connections from backend</div>
-            </div>
-
-            <div style={styles.stat}>
-              <div style={styles.statLabel}>
-                <Activity size={15} /> Timeline events
-              </div>
-              <div style={styles.statValue}>
-                {graph.eventCount ?? 0}
-              </div>
-              <div style={styles.statHint}>Events linked to incident</div>
-            </div>
-
-            <div style={styles.stat}>
-              <div style={styles.statLabel}>
-                <ShieldAlert size={15} /> Severity
-              </div>
-              <div
-                style={{
-                  ...styles.statValue,
-                  fontSize: 20,
-                  color:
-                    incident?.severity === "CRITICAL" ||
-                    incident?.severity === "HIGH"
-                      ? "#fb7185"
-                      : "#fbbf24",
-                }}
-              >
-                {incident?.severity || "UNKNOWN"}
-              </div>
-              <div style={styles.statHint}>
-                {incident?.status || "Status unavailable"}
-              </div>
-            </div>
-          </section>
-
-          <section style={styles.panel}>
-            <div style={styles.panelHeader}>
-              <div>
-                <h2 style={styles.panelTitle}>
-                  <Network
-                    size={16}
-                    style={{ verticalAlign: "middle", marginRight: 8 }}
-                  />
-                  Relationship map
-                </h2>
-                <p style={styles.panelSubtitle}>
-                  Four-column layout. Select any node to inspect its details.
-                </p>
-              </div>
-              <span style={styles.pill}>
-                {filteredNodes.length} VISIBLE NODES
-              </span>
-            </div>
-
-            <div style={styles.legend}>
-              {Object.entries(COLORS).map(([type, color]) => (
-                <span key={type} style={styles.legendItem}>
-                  <span style={{ ...styles.legendDot, background: color }} />
-                  {type}
-                </span>
-              ))}
-            </div>
-
-            <div style={styles.canvas}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(4, minmax(180px, 1fr))",
-                  gap: 12,
-                  minWidth: 820,
-                  marginBottom: 12,
-                }}
-              >
-                {COLUMN_INFO.map((column) => (
-                  <div
-                    key={column.type}
-                    style={{
-                      padding: "10px 12px",
-                      borderRadius: 9,
-                      background: "#111c2d",
-                      border: "1px solid #263449",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 800,
-                        letterSpacing: 1.4,
-                        color: COLORS[column.type],
-                      }}
-                    >
-                      {column.title}
-                    </div>
-                    <div
-                      style={{
-                        marginTop: 5,
-                        color: "#64748b",
-                        fontSize: 10,
-                      }}
-                    >
-                      {column.subtitle}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {filteredNodes.length === 0 ? (
-                <div style={{ padding: 30, textAlign: "center", color: "#94a3b8" }}>
-                  No nodes match your search.
-                </div>
-              ) : (
-                <div style={{ minWidth: 820 }}>
-                  <svg
-                    viewBox={`0 0 ${layout.width} ${layout.height}`}
-                    width="100%"
-                    style={{ display: "block", overflow: "visible" }}
-                    role="img"
-                    aria-label="Incident relationship graph"
-                  >
-                    <defs>
-                      <marker
-                        id="tracex-graph-arrow"
-                        markerWidth="7"
-                        markerHeight="7"
-                        refX="6"
-                        refY="3"
-                        orient="auto"
-                      >
-                        <path d="M0,0 L0,6 L6,3 z" fill="#64748b" />
-                      </marker>
-                    </defs>
-
-                    {visibleEdges.map((edge, index) => {
-                      const source = layout.positions[edge.source];
-                      const target = layout.positions[edge.target];
-                      if (!source || !target) return null;
-
-                      const dx = target.x - source.x;
-                      const curve = Math.max(35, Math.abs(dx) * 0.42);
-                      const path = `M ${source.x} ${source.y} C ${
-                        source.x + curve
-                      } ${source.y}, ${target.x - curve} ${
-                        target.y
-                      }, ${target.x} ${target.y}`;
-
-                      return (
-                        <path
-                          key={`${edge.source}-${edge.target}-${index}`}
-                          d={path}
-                          fill="none"
-                          stroke="#52637a"
-                          strokeWidth="1.5"
-                          strokeOpacity="0.8"
-                          markerEnd="url(#tracex-graph-arrow)"
-                        >
-                          <title>{edge.relationship}</title>
-                        </path>
-                      );
-                    })}
-
-                    {filteredNodes.map((node) => {
-                      const point = layout.positions[node.id];
-                      const color = COLORS[node.type] || "#94a3b8";
-                      const active = selectedNode?.id === node.id;
-                      const nodeWidth = 178;
-                      const nodeHeight = 56;
-
-                      return (
-                        <g
-                          key={node.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Inspect ${node.type}: ${node.label}`}
-                          onClick={() => setSelectedNode(node)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              setSelectedNode(node);
-                            }
-                          }}
-                          style={{ cursor: "pointer", outline: "none" }}
-                        >
-                          <rect
-                            x={point.x - nodeWidth / 2}
-                            y={point.y - nodeHeight / 2}
-                            width={nodeWidth}
-                            height={nodeHeight}
-                            rx="10"
-                            fill={active ? "#20334b" : "#111c2d"}
-                            stroke={color}
-                            strokeWidth={active ? 2.5 : 1.3}
-                          />
-
-                          <circle
-                            cx={point.x - 74}
-                            cy={point.y}
-                            r="4"
-                            fill={color}
-                          />
-
-                          <text
-                            x={point.x - 62}
-                            y={point.y - 4}
-                            fill="#e2e8f0"
-                            fontSize="11"
-                            fontWeight="650"
-                          >
-                            {shortText(node.label, 19)}
-                          </text>
-
-                          <text
-                            x={point.x - 62}
-                            y={point.y + 13}
-                            fill={color}
-                            fontSize="9"
-                            letterSpacing="0.5"
-                          >
-                            {node.type}
-                          </text>
-
-                          <title>{node.label}</title>
-                        </g>
-                      );
-                    })}
-                  </svg>
-                </div>
-              )}
-            </div>
-
-            <div
-              style={{
-                padding: "12px 18px",
-                borderTop: "1px solid #263449",
-                color: "#64748b",
-                fontSize: 11,
-              }}
+        <div className="ag-toolbar">
+          <div className="ag-toolbar-actions">
+            <button
+              className="ag-button"
+              onClick={zoomIn}
+              aria-label="Zoom in"
+              title="Zoom in"
             >
-              Relationship labels are shown in the list below to keep the map readable.
-            </div>
-          </section>
+              <ZoomIn size={15} />
+            </button>
 
-          <section style={styles.panel}>
-            <div style={styles.panelHeader}>
-              <div>
-                <h2 style={styles.panelTitle}>Graph entities</h2>
-                <p style={styles.panelSubtitle}>
-                  Search by type, endpoint, IP or identifier.
-                </p>
-              </div>
-              <span style={styles.pill}>{filteredNodes.length} RESULTS</span>
-            </div>
+            <button
+              className="ag-button"
+              onClick={zoomOut}
+              aria-label="Zoom out"
+              title="Zoom out"
+            >
+              <ZoomOut size={15} />
+            </button>
 
-            <div style={{ padding: "14px 18px 0" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                  padding: "0 12px",
-                  border: "1px solid #334155",
-                  borderRadius: 9,
-                  background: "#0a1321",
-                }}
+            <button
+              className="ag-button"
+              onClick={resetGraph}
+              title="Reset graph layout"
+            >
+              <Maximize2 size={15} />
+              Reset
+            </button>
+          </div>
+
+          <span className="ag-pill">
+            {filteredNodes.length} NODES · {filteredEdges.length} EDGES
+          </span>
+        </div>
+
+        <div className="ag-search">
+          <Search size={16} color="#94a3b8" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search IP, event, API or node type..."
+            aria-label="Search graph nodes"
+          />
+          {search && (
+            <button
+              className="ag-button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {loadingGraph ? (
+          <div className="ag-empty">Loading incident graph...</div>
+        ) : graphError ? (
+          <div className="ag-empty">
+            The graph could not be loaded. Use the retry button above.
+          </div>
+        ) : !incidentId ? (
+          <div className="ag-empty">
+            Select an incident to view its attack graph.
+          </div>
+        ) : graphData.nodes.length === 0 ? (
+          <div className="ag-empty">
+            No graph nodes were returned for this incident.
+          </div>
+        ) : (
+          <div className="ag-canvas">
+            <div
+              ref={graphContainerRef}
+              className="ag-cytoscape"
+              aria-label="Interactive attack relationship graph"
+            />
+
+            <div className="ag-canvas-count">
+              {stats.nodes} entities · {stats.edges} relationships
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="ag-panel">
+        <div className="ag-panel-header">
+          <div>
+            <h2 className="ag-panel-title">Graph entities</h2>
+            <p className="ag-panel-subtitle">
+              Select an entity to focus it on the graph and inspect its data.
+            </p>
+          </div>
+          <span className="ag-pill">{filteredNodes.length} RESULTS</span>
+        </div>
+
+        {filteredNodes.length === 0 ? (
+          <div className="ag-empty">No entities match your search.</div>
+        ) : (
+          <div className="ag-entity-grid">
+            {filteredNodes.map((node) => (
+              <button
+                key={node.id}
+                className={`ag-entity-card ${
+                  selectedNode?.id === node.id ? "is-selected" : ""
+                }`}
+                onClick={() => focusNode(node)}
               >
-                <Search size={15} color="#64748b" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search entities..."
+                <div
+                  className="ag-entity-type"
                   style={{
-                    width: "100%",
-                    padding: "12px 0",
-                    background: "transparent",
-                    border: 0,
-                    outline: 0,
-                    color: "#e2e8f0",
-                    fontSize: 12,
+                    color: NODE_COLORS[node.type] || "#94a3b8",
                   }}
-                />
-                {query && (
-                  <button
-                    onClick={() => setQuery("")}
-                    aria-label="Clear search"
-                    style={{
-                      background: "transparent",
-                      border: 0,
-                      color: "#94a3b8",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-            </div>
+                >
+                  {node.type}
+                </div>
+                <div className="ag-entity-name">{node.label}</div>
+                <div className="ag-entity-meta">
+                  ID: {node.id.length > 28 ? `${node.id.slice(0, 25)}...` : node.id}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
-            {filteredNodes.length === 0 ? (
-              <EmptyState
-                title="No matching entities"
-                message="Try searching for a different IP, endpoint or node type."
-              />
-            ) : (
-              <div style={styles.nodeGrid}>
-                {filteredNodes.map((node) => {
-                  const color = COLORS[node.type] || "#94a3b8";
-                  const active = selectedNode?.id === node.id;
+      <section className="ag-panel">
+        <div className="ag-panel-header">
+          <div>
+            <h2 className="ag-panel-title">Relationships</h2>
+            <p className="ag-panel-subtitle">
+              Connections between entities in this incident.
+            </p>
+          </div>
+          <span className="ag-pill">{filteredEdges.length} EDGES</span>
+        </div>
 
-                  return (
-                    <button
-                      key={node.id}
-                      onClick={() => setSelectedNode(node)}
-                      style={{
-                        ...styles.nodeCard,
-                        borderColor: active ? color : "#2b3a50",
-                        boxShadow: active ? `inset 3px 0 ${color}` : "none",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 9,
-                            fontWeight: 800,
-                            letterSpacing: 1,
-                            color,
-                          }}
-                        >
-                          {node.type}
-                        </span>
-                        <ChevronRight size={14} color="#64748b" />
-                      </div>
+        {filteredEdges.length === 0 ? (
+          <div className="ag-empty">No relationships to display.</div>
+        ) : (
+          filteredEdges.slice(0, 100).map((edge) => {
+            const source = graphData.nodes.find(
+              (node) => node.id === edge.source
+            );
+            const target = graphData.nodes.find(
+              (node) => node.id === edge.target
+            );
 
-                      <div
-                        style={{
-                          marginTop: 10,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          overflowWrap: "anywhere",
-                        }}
-                      >
-                        {node.label}
-                      </div>
+            return (
+              <div className="ag-relationship-row" key={edge.id}>
+                <button
+                  className="ag-relationship-endpoint"
+                  onClick={() => source && focusNode(source)}
+                  title={source?.label || edge.source}
+                >
+                  {source?.label || edge.source}
+                </button>
 
-                      <div
-                        style={{
-                          marginTop: 7,
-                          color: "#64748b",
-                          fontSize: 10,
-                        }}
-                      >
-                        {edges.filter(
-                          (edge) =>
-                            edge.source === node.id ||
-                            edge.target === node.id
-                        ).length}{" "}
-                        connected relationships
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section style={styles.panel}>
-            <div style={styles.panelHeader}>
-              <div>
-                <h2 style={styles.panelTitle}>
-                  <GitBranch
-                    size={16}
-                    style={{ verticalAlign: "middle", marginRight: 8 }}
-                  />
-                  Relationships
-                </h2>
-                <p style={styles.panelSubtitle}>
-                  Source → relationship → target
-                </p>
-              </div>
-              <span style={styles.pill}>{visibleEdges.length} EDGES</span>
-            </div>
-
-            {visibleEdges.length === 0 ? (
-              <EmptyState
-                title="No relationships to show"
-                message="The current search has no connected edges."
-              />
-            ) : (
-              visibleEdges.map((edge, index) => {
-                const source = nodes.find((node) => node.id === edge.source);
-                const target = nodes.find((node) => node.id === edge.target);
-
-                return (
-                  <div
-                    key={`${edge.source}-${edge.target}-${index}`}
-                    style={styles.relationshipRow}
-                  >
-                    <button
-                      onClick={() => source && setSelectedNode(source)}
-                      style={{
-                        minWidth: 0,
-                        textAlign: "left",
-                        border: 0,
-                        background: "transparent",
-                        color: "#cbd5e1",
-                        cursor: "pointer",
-                        overflowWrap: "anywhere",
-                        fontSize: 11,
-                      }}
-                    >
-                      {shortText(source?.label || edge.source, 32)}
-                    </button>
-
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ color: "#60a5fa", fontSize: 10, fontWeight: 800 }}>
-                        {edge.relationship}
-                      </div>
-                      <ChevronRight
-                        size={14}
-                        color="#64748b"
-                        style={{ margin: "4px auto 0" }}
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => target && setSelectedNode(target)}
-                      style={{
-                        minWidth: 0,
-                        textAlign: "left",
-                        border: 0,
-                        background: "transparent",
-                        color: "#cbd5e1",
-                        cursor: "pointer",
-                        overflowWrap: "anywhere",
-                        fontSize: 11,
-                      }}
-                    >
-                      {shortText(target?.label || edge.target, 32)}
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </section>
-
-          {selectedNode && (
-            <section style={styles.panel}>
-              <div style={styles.panelHeader}>
-                <div>
-                  <h2 style={styles.panelTitle}>Entity details</h2>
-                  <p style={styles.panelSubtitle}>
-                    {selectedNode.type} · {selectedNode.label}
-                  </p>
+                <div className="ag-relationship-label">
+                  {edge.relationship.replaceAll("_", " ")}
                 </div>
 
                 <button
-                  style={styles.button}
-                  onClick={() => setSelectedNode(null)}
+                  className="ag-relationship-endpoint"
+                  onClick={() => target && focusNode(target)}
+                  title={target?.label || edge.target}
+                  style={{ textAlign: "right" }}
                 >
-                  <X size={14} />
-                  Clear selection
+                  {target?.label || edge.target}
                 </button>
               </div>
+            );
+          })
+        )}
 
-              <div style={styles.detail}>
+        {filteredEdges.length > 100 && (
+          <div className="ag-empty">
+            Showing the first 100 relationships. Use search to narrow the list.
+          </div>
+        )}
+      </section>
+
+      {selectedNode && (
+        <section className="ag-panel">
+          <div className="ag-panel-header">
+            <div>
+              <h2 className="ag-panel-title">Selected entity details</h2>
+              <p className="ag-panel-subtitle">
+                {selectedNode.label || selectedNode.id}
+              </p>
+            </div>
+
+            <button
+              className="ag-button"
+              onClick={() => {
+                setSelectedNode(null);
+                const cy = cyRef.current;
+                if (cy && !cy.destroyed()) cy.elements().unselect();
+              }}
+            >
+              <X size={15} />
+              Close
+            </button>
+          </div>
+
+          <div className="ag-detail">
+            <div className="ag-detail-grid">
+              <div>
+                <div className="ag-detail-label">Entity type</div>
                 <div
+                  className="ag-detail-value"
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 18,
-                    marginBottom: 20,
+                    color:
+                      NODE_COLORS[selectedNode.type] || "#e2e8f0",
                   }}
                 >
-                  <div>
-                    <div style={styles.detailLabel}>Node type</div>
-                    <div
-                      style={{
-                        ...styles.detailValue,
-                        color: COLORS[selectedNode.type] || "#e2e8f0",
-                      }}
-                    >
-                      {selectedNode.type}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={styles.detailLabel}>Relationships</div>
-                    <div style={styles.detailValue}>
-                      {edges.filter(
-                        (edge) =>
-                          edge.source === selectedNode.id ||
-                          edge.target === selectedNode.id
-                      ).length}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={styles.detailLabel}>Node ID</div>
-                    <div style={styles.detailValue}>{selectedNode.id}</div>
-                  </div>
+                  {selectedNode.type}
                 </div>
-
-                <div style={styles.detailLabel}>Backend details</div>
-                <pre
-                  style={{
-                    margin: 0,
-                    padding: 16,
-                    borderRadius: 10,
-                    background: "#080f1a",
-                    border: "1px solid #263449",
-                    color: "#cbd5e1",
-                    fontSize: 11,
-                    lineHeight: 1.8,
-                    whiteSpace: "pre-wrap",
-                    overflowWrap: "anywhere",
-                    overflowX: "auto",
-                  }}
-                >
-                  {JSON.stringify(selectedNode.details || {}, null, 2)}
-                </pre>
               </div>
-            </section>
-          )}
-        </>
+
+              <div>
+                <div className="ag-detail-label">Entity ID</div>
+                <div className="ag-detail-value">{selectedNode.id}</div>
+              </div>
+
+              <div>
+                <div className="ag-detail-label">Label</div>
+                <div className="ag-detail-value">
+                  {selectedNode.label || "Not available"}
+                </div>
+              </div>
+            </div>
+
+            <div className="ag-detail-label">Raw entity data</div>
+            <pre className="ag-detail-json">
+              {JSON.stringify(selectedNode, null, 2)}
+            </pre>
+          </div>
+        </section>
       )}
     </div>
   );
